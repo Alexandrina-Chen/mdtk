@@ -480,7 +480,7 @@ class Data(object):
                 # create updated core-core bond
                 updatedbdtype = deepcopy(bondtype)
                 # print(1 - (idmass / (icmass+idmass) ) - (jdmass / (jcmass+jdmass) ))
-                updatedbdtype['k'] -= newbdtype1['k']  - newbdtype2['k'] 
+                updatedbdtype['k'] = bondtype['k'] - newbdtype1['k']  - newbdtype2['k'] 
                 updatedbdtype['ddflag'] = 'cc'
                 updatedbdtype['dd0'] = newbdtype1['id']
                 updatedbdtype['dd1'] = newbdtype2['id']
@@ -535,7 +535,7 @@ class Data(object):
                     newbdtypes2.append(newbdtype1)
                     # create updated core-core bond
                     updatedbdtype = deepcopy(bondtype)
-                    updatedbdtype['k'] *= (1 - (jdmass / (jcmass+jdmass) )) 
+                    updatedbdtype['k'] -= newbdtype1['k']
                     updatedbdtype['dd'] = newbdtype1['id']
                     updatedbdtype['ddflag'] = 'nc'
                     updatedbdtypes.append(updatedbdtype)
@@ -553,7 +553,7 @@ class Data(object):
                 raise RuntimeError(f"Unknown dflag for bond type {bondtype['id']}, type i {bondtype['iid']} with dflag {self.atomtypes[iid - 1]['dflag']} and type j {bondtype['jid']} with dflag {self.atomtypes[jid - 1]['dflag']}")
 
         if self.debug:
-            for bdt in updatedbdtypes:
+            for bdt in updatedbdtypes+newbdtypes+newbdtypes2:
                 print(bdt)
             for bdt in newbdtypes+newbdtypes2:
                 print(bdt)
