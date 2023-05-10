@@ -1,0 +1,166 @@
+#!/usr/bin/env python
+# -*- encoding: utf-8 -*-
+'''
+Filename         :SymLJ
+Description      :Symmetrizing the LJ parameters
+Time             :2023/04/12 15:33:37
+Author           :Sijia Chen
+Version          :1.0
+Email            :sijiachen@uchicago.edu
+'''
+import argparse
+from copy import deepcopy
+
+usage = \
+"""
+==============================================================================
+Scale epsilon LJ parameters in pair-sc.lmp LAMMPS file
+The pair coefficient file MUST be scaled first!!
+------------------------------------------------------------------------------
+"""
+
+def paircoeffline(pc):
+    return "pair_coeff {0:5d} {1:5d} {2:>25} {3:3.6f} {4:3.6f} {5:s}\n".format(pc['i'],pc['j'], pc['pair'], pc['eps'], pc['sig'], ' '.join(pc['note']))
+
+def readAtomTypes(atominfo):
+    res = []
+    for line in open(atominfo, 'r'):
+        tok = line.strip().split()
+        id = int(tok[0])
+        mass = float(tok[1])
+        dtype = tok[2]
+        dd = int(tok[3])
+        type = tok[4]
+        info = {'id':id, 'mass':mass,'dtype':dtype,'dd':dd,'type':type}
+        res.append(info)
+
+    return res
+
+def readPair(pairin):
+    res= []
+    for line in open(pairin, 'r'):
+        tok = line.strip().split()
+        if tok[0] != 'pair_coeff':
+            continue
+        if not (tok[3].startswith('lj') and tok[1].isdigit() and tok[2].isdigit()):
+            res.append(line.strip())
+            continue
+        i = int(tok[1])
+        j = int(tok[2])
+        pair = tok[3]
+        eps = float(tok[4])
+        sig = float(tok[5])
+        com = tok[6:]
+        res.append({'i':i,'j':j,'pair':pair,'eps':eps,'sig':sig,'note':com})
+    return res
+
+def symmetrizeLJ(atominfo, paircoeffs, outfile):
+    newpaircoeffs = []
+    for paircoeff in paircoeffs:
+        i = paircoeff['i']
+        j = paircoeff['j']
+        idtype = atominfo[i-1]['dtype']
+        jdtype = atominfo[j-1]['dtype']
+        imass = atominfo[i-1]['mass']
+        jmass = atominfo[j-1]['mass']
+        if idtype == 'c' and jdtype == 'c':
+            if i != j :
+                id = atominfo[i-1]['dd'] # get the atom id of the drude particle for atom id i
+                jd = atominfo[j-1]['dd'] # get the atom id of the drude particle for atom id j
+                idmass = atominfo[id-1]['mass']
+                jdmass = atominfo[jd-1]['mass']
+                # i-DP j-DC
+                newpaircoeff1 = deepcopy(paircoeff)
+                newpaircoeff1['i'] = j
+                newpaircoeff1['j'] = id
+                newpaircoeff1['pair'] = 'lj/cut'
+                newpaircoeff1['eps'] *= (idmass / (imass + idmass))
+                newpaircoeff1['note'][1] = atominfo[j-1]['type'] 
+                newpaircoeff1['note'][2] = atominfo[id-1]['type']
+                # i-DC j-DP
+                newpaircoeff2 = deepcopy(paircoeff)
+                newpaircoeff2['j'] = jd
+                newpaircoeff2['pair'] = 'lj/cut'
+                newpaircoeff2['eps'] *= (jdmass / (jmass + jdmass))
+                newpaircoeff2['note'][1] = atominfo[i-1]['type']
+                newpaircoeff2['note'][2] = atominfo[jd-1]['type']
+                # 
+                newpaircoeffs.append(newpaircoeff1)
+                newpaircoeffs.append(newpaircoeff2)
+                # update eps of core-core
+                paircoeff['eps'] *= (1 - (idmass / (imass + idmass)) - (jdmass / (jmass + jdmass)))
+                paircoeff['note'][1] = atominfo[i-1]['type'] 
+                paircoeff['note'][2] = atominfo[j-1]['type'] 
+            else:
+                id = atominfo[i-1]['dd'] # get the atom id of the drude particle for atom id i
+                idmass = atominfo[id-1]['mass']
+                # i-DC i-DP
+                newpaircoeff1 = deepcopy(paircoeff)
+                newpaircoeff1['j'] = id
+                newpaircoeff1['pair'] = 'lj/cut'
+                newpaircoeff1['eps'] *= (idmass / (imass + idmass))
+                newpaircoeff1['note'][1] = atominfo[i-1]['type']
+                newpaircoeff1['note'][2] = atominfo[id-1]['type']
+                # 
+                newpaircoeffs.append(newpaircoeff1)
+                # update eps of core-core
+                paircoeff['eps'] *= (1 - (idmass / (imass + idmass))*2 )
+                paircoeff['note'][1] = atominfo[i-1]['type']
+                paircoeff['note'][2] = atominfo[i-1]['type']
+
+        elif idtype == 'c' and jdtype == 'n':
+            id = atominfo[i-1]['dd'] # get the atom id of the drude particle for atom id i
+            idmass = atominfo[id-1]['mass']
+            # i-DP j-DC
+            newpaircoeff1 = deepcopy(paircoeff)
+            newpaircoeff1['i'] = j
+            newpaircoeff1['j'] = id
+            newpaircoeff1['pair'] = 'lj/cut'
+            newpaircoeff1['eps'] *= (idmass / (imass + idmass))
+            newpaircoeff1['note'][1] = atominfo[j-1]['type'] 
+            newpaircoeff1['note'][2] = atominfo[id-1]['type']
+            # 
+            newpaircoeffs.append(newpaircoeff1)
+            # update eps of core-core
+            paircoeff['eps'] *= (1 - (idmass / (imass + idmass)) )
+            paircoeff['note'][1] = atominfo[i-1]['type']
+            paircoeff['note'][2] = atominfo[j-1]['type']
+        elif idtype == 'n' and jdtype == 'c':
+            jd = atominfo[j-1]['dd'] # get the atom id of the drude particle for atom id j
+            jdmass = atominfo[jd-1]['mass']
+            # i-N j-DP
+            newpaircoeff2 = deepcopy(paircoeff)
+            newpaircoeff2['j'] = jd
+            newpaircoeff2['pair'] = 'lj/cut'
+            newpaircoeff2['eps'] *= (jdmass / (jmass + jdmass))
+            newpaircoeff2['note'][1] = atominfo[i-1]['type']
+            newpaircoeff2['note'][2] = atominfo[j-1]['type']
+            # 
+            newpaircoeffs.append(newpaircoeff2)
+            # update eps of core-core
+            paircoeff['eps'] *= (1 - (jdmass / (jmass + jdmass)))
+            paircoeff['note'][1] = atominfo[i-1]['type']
+            paircoeff['note'][2] = atominfo[j-1]['type']
+    with open(outfile,'w') as file:
+        for paircoeff in paircoeffs + newpaircoeffs:
+            file.writelines(paircoeffline(paircoeff))
+
+    print(f"{len(newpaircoeffs)} new pair coefficients")
+
+
+def main():
+    parser = argparse.ArgumentParser(description = usage, formatter_class = argparse.RawTextHelpFormatter)
+    parser.add_argument('-ip', '--pair_in_filename', type=str, default = 'pair-sc.lmp', help = 'pair style input file (default: pair-sc.lmp)')
+    parser.add_argument('-op', '--pair_out_filename', type=str, default = 'pair-sc-sym.lmp', help = 'pair style output file (default: pair-sc-sym.lmp)')
+    parser.add_argument('-ai', '--atom_infomation', type=str, default = 'atom.info', help = 'pair style input file (default: atom.info)')
+
+
+    args = parser.parse_args()
+    atominfo = readAtomTypes(args.atom_infomation)
+    paircoeffs = readPair(args.pair_in_filename)
+    symmetrizeLJ(atominfo,paircoeffs, args.pair_out_filename)
+
+
+    
+if __name__ == '__main__':
+    main()

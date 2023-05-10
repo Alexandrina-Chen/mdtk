@@ -1,0 +1,1187 @@
+#!/usr/bin/env python
+# polarizer.py - add Drude oscillators to LAMMPS data file.
+# Agilio Padua <agilio.padua@ens-lyon.fr>
+# Alain Dequidt <alain.dequidt@uca.fr>
+# Kateryna Goloviznina <kateryna.goloviznina@ens-lyon.fr>
+# version 2021/04/03
+
+# -*- encoding: utf-8 -*-
+'''
+Filename         :polarizer
+Description      :modified from Padua's polarizer
+Time             :2023/04/10 14:02:45
+Author           :Sijia Chen
+Version          :1.0
+Email            :sijiachen@uchicago.edu
+'''
+
+
+
+import argparse
+import random
+from copy import deepcopy
+
+
+usage = """
+==============================================================================
+Add Drude oscillators to LAMMPS data file.
+------------------------------------------------------------------------------
+Format of file containing specification of Drude oscillators (alpha.ff):
+  # type  dm/u  dq/e  k/(kJ/molA2)  alpha/A3  thole
+  C3H     1.0   0.0   4184.0        1.016     2.6
+  ...
+* dm is the mass to place on the Drude particle (subtracted from its core),
+* dq is the charge to place on the Drude particle (subtracted from its core),
+* k is the harmonic force constant of the bond between core and Drude,
+* alpha is the polarizability, hyrdogen aroms are not merged,
+* thole is a parameter of the Thole damping function.
+------------------------------------------------------------------------------
+A Drude particle is created for each atom in the LAMMPS data file
+that corresponds to an atom type given in the Drude file.
+Since LAMMPS uses numbers for atom types in the data file, a comment
+after each line in the Masses section has to be introduced to allow
+identification of the atom types within the force field database:
+  Masses
+  1   12.011  # C3H
+  2   12.011  # CTO
+  ...
+This script will add new atom types, new bond types, new atoms and
+new bonds to the data file.
+It will also generate some commands to be included in the LAMMPS input script,
+which are related to the topology and force field, namely fix drude,
+pair_style and pair_coeff commands. For information on thermostating please
+read the documentation of the USER-DRUDE package.
+------------------------------------------------------------------------------
+This tool can also be used to revert a Drude-polarized data file to a
+non-polarizable one.
+==============================================================================
+"""
+
+# keywords of header and main sections (from data.py in Pizza.py)
+
+hkeywords = ["atoms", "ellipsoids", "lines", "triangles", "bodies",
+             "bonds", "angles", "dihedrals", "impropers",
+             "atom types", "bond types", "angle types", "dihedral types",
+             "improper types", "xlo xhi", "ylo yhi", "zlo zhi", "xy xz yz"]
+
+skeywords = [["Masses", "atom types"],
+             ["Pair Coeffs", "atom types"],
+             ["Bond Coeffs", "bond types"], ["Angle Coeffs", "angle types"],
+             ["Dihedral Coeffs", "dihedral types"],
+             ["Improper Coeffs", "improper types"],
+             ["BondBond Coeffs", "angle types"],
+             ["BondAngle Coeffs", "angle types"],
+             ["MiddleBondTorsion Coeffs", "dihedral types"],
+             ["EndBondTorsion Coeffs", "dihedral types"],
+             ["AngleTorsion Coeffs", "dihedral types"],
+             ["AngleAngleTorsion Coeffs", "dihedral types"],
+             ["BondBond13 Coeffs", "dihedral types"],
+             ["AngleAngle Coeffs", "improper types"],
+             ["Atoms", "atoms"], ["Velocities", "atoms"],
+             ["Ellipsoids", "ellipsoids"],
+             ["Lines", "lines"], ["Triangles", "triangles"],
+             ["Bodies", "bodies"],
+             ["Bonds", "bonds"],
+             ["Angles", "angles"], ["Dihedrals", "dihedrals"],
+             ["Impropers", "impropers"], ["Molecules", "atoms"]]
+
+typeinfos = {'CT': {'type': 'CT', 'utype': 'CT', 'm': 12.011}, 'CS': {'type': 'CS', 'utype': 'CT', 'm': 12.011}, 'CT2': {'type': 'CT2', 'utype': 'CT', 'm': 12.011}, 'CT3': {'type': 'CT3', 'utype': 'CT', 'm': 12.011}, 'HC': {'type': 'HC', 'utype': 'HC', 'm': 1.008}, 'CA': {'type': 'CA', 'utype': 'CA', 'm': 12.011}, 'HA': {'type': 'HA', 'utype': 'HA', 'm': 1.008}, 'C1': {'type': 'C1', 'utype': 'CT', 'm': 12.011}, 'C1A': {'type': 'C1A', 'utype': 'CT', 'm': 12.011}, 'H1': {'type': 'H1', 'utype': 'HC', 'm': 1.008}, 'C2': {'type': 'C2', 'utype': 'CT', 'm': 12.011}, 'CE': {'type': 'CE', 'utype': 'CT', 'm': 12.011}, 'CR': {'type': 'CR', 'utype': 'CR', 'm': 12.011}, 'CW': {'type': 'CW', 'utype': 'CW', 'm': 12.011}, 'HCR': {'type': 'HCR', 'utype': 'HA', 'm': 1.008}, 'HCW': {'type': 'HCW', 'utype': 'HA', 'm': 1.008}, 'NA': {'type': 'NA', 'utype': 'NA', 'm': 14.007}, 'CRH': {'type': 'CRH', 'utype': 'CR', 'm': 12.011}, 'NAH': {'type': 'NAH', 'utype': 'NA', 'm': 14.007}, 'CWH': {'type': 'CWH', 'utype': 'CW', 'm': 12.011}, 'HNA': {'type': 'HNA', 'utype': 'HA', 'm': 1.008}, 'CRM': {'type': 'CRM', 'utype': 'CR', 'm': 12.011}, 'NAM': {'type': 'NAM', 'utype': 'NA', 'm': 14.007}, 'CCR': {'type': 'CCR', 'utype': 'CT', 'm': 12.011}, 'C1T': {'type': 'C1T', 'utype': 'CT', 'm': 12.011}, 'CAP': {'type': 'CAP', 'utype': 'CA', 'm': 12.011}, 'CAM': {'type': 'CAM', 'utype': 'CA', 'm': 12.011}, 'CAO': {'type': 'CAO', 'utype': 'CA', 'm': 12.011}, 'CAT': {'type': 'CAT', 'utype': 'CA', 'm': 12.011}, 'HAT': {'type': 'HAT', 'utype': 'HA', 'm': 1.008}, 'HT': {'type': 'HT', 'utype': 'HC', 'm': 1.008}, 'NAP': {'type': 'NAP', 'utype': 'NA', 'm': 14.007}, 'CAPO': {'type': 'CAPO', 'utype': 'CA', 'm': 12.011}, 'CAPM': {'type': 'CAPM', 'utype': 'CA', 'm': 12.011}, 'CAPP': {'type': 'CAPP', 'utype': 'CA', 'm': 12.011}, 'HAP': {'type': 'HAP', 'utype': 'HA', 'm': 1.008}, 'NAQ': {'type': 'NAQ', 'utype': 'NA', 'm': 14.007}, 'CAQ': {'type': 'CAQ', 'utype': 'CA', 'm': 12.011}, 'C1H': {'type': 'C1H', 'utype': 'CT', 'm': 12.011}, 'CFH': {'type': 'CFH', 'utype': 'CF', 'm': 12.011}, 'CTF': {'type': 'CTF', 'utype': 'CF', 'm': 12.011}, 'CSF': {'type': 'CSF', 'utype': 'CF', 'm': 12.011}, 'F': {'type': 'F', 'utype': 'F', 'm': 18.998}, 'N4': {'type': 'N4', 'utype': 'NT', 'm': 14.007}, 'N3': {'type': 'N3', 'utype': 'NT', 'm': 14.007}, 'H3': {'type': 'H3', 'utype': 'HN', 'm': 1.008}, 'CTO': {'type': 'CTO', 'utype': 'CT', 'm': 12.011}, 'H1O': {'type': 'H1O', 'utype': 'HC', 'm': 1.008}, 'OH': {'type': 'OH', 'utype': 'OH', 'm': 15.999}, 'HO': {'type': 'HO', 'utype': 'HO', 'm': 1.008}, 'C2O': {'type': 'C2O', 'utype': 'CT', 'm': 12.011}, 'COL': {'type': 'COL', 'utype': 'CT', 'm': 12.011}, 'NG': {'type': 'NG', 'utype': 'NG', 'm': 14.007}, 'CG': {'type': 'CG', 'utype': 'CG', 'm': 12.011}, 'HG': {'type': 'HG', 'utype': 'HG', 'm': 1.008}, 'P3': {'type': 'P3', 'utype': 'PT', 'm': 30.974}, 'C1P': {'type': 'C1P', 'utype': 'CT', 'm': 12.011}, 'C1PS': {'type': 'C1PS', 'utype': 'CT', 'm': 12.011}, 'CSO': {'type': 'CSO', 'utype': 'CT', 'm': 12.011}, 'C3O': {'type': 'C3O', 'utype': 'CT', 'm': 12.011}, 'HY': {'type': 'HY', 'utype': 'HC', 'm': 1.008}, 'OY': {'type': 'OY', 'utype': 'OY', 'm': 15.999}, 'Li': {'type': 'Li', 'utype': 'Li', 'm': 6.941}, 'Na': {'type': 'Na', 'utype': 'Na', 'm': 22.99}, 'B': {'type': 'B', 'utype': 'B', 'm': 10.811}, 'FB': {'type': 'FB', 'utype': 'F', 'm': 18.998}, 'P': {'type': 'P', 'utype': 'P', 'm': 30.974}, 'FP': {'type': 'FP', 'utype': 'F', 'm': 18.998}, 'Cl': {'type': 'Cl', 'utype': 'Cl', 'm': 35.453}, 'Br': {'type': 'Br', 'utype': 'Br', 'm': 79.904}, 'CBT': {'type': 'CBT', 'utype': 'CF', 'm': 12.011}, 'SBT': {'type': 'SBT', 'utype': 'SB', 'm': 32.066}, 'NBT': {'type': 'NBT', 'utype': 'NB', 'm': 14.0}, 'OBT': {'type': 'OBT', 'utype': 'OB', 'm': 15.999}, 'F1': {'type': 'F1', 'utype': 'FB', 'm': 18.998}, 'OTF': {'type': 'OTF', 'utype': 'OB', 'm': 15.999}, 'C1F': {'type': 'C1F', 'utype': 'CF', 'm': 12.011}, 'CEF': {'type': 'CEF', 'utype': 'CF', 'm': 12.011}, 'FSI': {'type': 'FSI', 'utype': 'FB', 'm': 18.998}, 'N3A': {'type': 'N3A', 'utype': 'N3', 'm': 14.0}, 'CZA': {'type': 'CZA', 'utype': 'CZ', 'm': 12.011}, 'NZA': {'type': 'NZA', 'utype': 'NZ', 'm': 14.001}, 'O2': {'type': 'O2', 'utype': 'O2', 'm': 15.999}, 'CO2': {'type': 'CO2', 'utype': 'CO', 'm': 12.011}, 'CTA': {'type': 'CTA', 'utype': 'CT', 'm': 12.011}, 'C2C': {'type': 'C2C', 'utype': 'CT', 'm': 12.011}, 'C3C': {'type': 'C3C', 'utype': 'CT', 'm': 12.011}, 'C2V': {'type': 'C2V', 'utype': 'CT', 'm': 12.011}, 'C3V': {'type': 'C3V', 'utype': 'CT', 'm': 12.011}, 'CTV': {'type': 'CTV', 'utype': 'CT', 'm': 12.011}, 'CPH': {'type': 'CPH', 'utype': 'CA', 'm': 12.011}, 'CBI': {'type': 'CBI', 'utype': 'CA', 'm': 12.011}, 'CBP': {'type': 'CBP', 'utype': 'CA', 'm': 12.011}, 'O2F': {'type': 'O2F', 'utype': 'OC', 'm': 15.999}, 'CFA': {'type': 'CFA', 'utype': 'CF', 'm': 12.011}, 'FFA': {'type': 'FFA', 'utype': 'F', 'm': 18.998}, 'SO': {'type': 'SO', 'utype': 'SO', 'm': 32.066}, 'OS4': {'type': 'OS4', 'utype': 'OS', 'm': 15.999}, 'OC4': {'type': 'OC4', 'utype': 'OC', 'm': 15.999}, 'CS4': {'type': 'CS4', 'utype': 'CT', 'm': 12.011}, 'HS4': {'type': 'HS4', 'utype': 'HC', 'm': 1.008}, 'OS3': {'type': 'OS3', 'utype': 'OS', 'm': 15.999}, 'CS3': {'type': 'CS3', 'utype': 'CT', 'm': 12.011}, 'HS3': {'type': 'HS3', 'utype': 'HC', 'm': 1.008}, 'SK': {'type': 'SK', 'utype': 'SK', 'm': 32.066}, 'CK': {'type': 'CK', 'utype': 'CK', 'm': 12.011}, 'NK': {'type': 'NK', 'utype': 'NK', 'm': 14.001}, 'C3A': {'type': 'C3A', 'utype': 'C3A', 'm': 12.011}, 'CN': {'type': 'CN', 'utype': 'CN', 'm': 12.011}, 'NC': {'type': 'NC', 'utype': 'NC', 'm': 14.001}, 'CAPS': {'type': 'CAPS', 'utype': 'CA', 'm': 12.011}, 'CAMS': {'type': 'CAMS', 'utype': 'CA', 'm': 12.011}, 'CAOS': {'type': 'CAOS', 'utype': 'CA', 'm': 12.011}, 'CATS': {'type': 'CATS', 'utype': 'CA', 'm': 12.011}, 'CTTS': {'type': 'CTTS', 'utype': 'CT', 'm': 12.011}, 'HATS': {'type': 'HATS', 'utype': 'HA', 'm': 1.008}, 'HTS': {'type': 'HTS', 'utype': 'HC', 'm': 1.008}}
+
+def massline(att):
+    return "{0:4d} {1:8.3f}  # {2}\n".format(att['id'], att['m'], att['type'])
+
+def bdtline(bdt):
+    return "{0:4d} {1:12.6f} {2:12.6f}  {3}\n".format(bdt['id'], bdt['k'],
+                                                     bdt['r0'], bdt['note'])
+
+def atomline(at):
+    return "{0:7d} {1:7d} {2:4d} {3:10.6f} {4:13.6e} {5:13.6e} {6:13.6e} "\
+           " {7}\n".format(at['n'], at['mol'], at['id'], at['q'],
+                           at['x'], at['y'], at['z'], at['note'])
+
+def bondline(bd):
+    return "{0:7d} {1:4d} {2:7d} {3:7d}  {4}\n".format(bd['n'], bd['id'],
+                                            bd['i'], bd['j'], bd['note'])
+
+def velline(at):
+    return "{0:7d} {1:13.6e} {2:13.6e} {3:13.6e} \n".format(at['n'],
+                                       at['vx'], at['vy'], at['vz'])
+
+############:
+def attline(att):
+    if len(att['type'].split())>1:
+        type = att['type'].split()[0] + '-' + att['type'].split()[1]
+    else: 
+        type = att['type']
+    return "{0:5d} {1:8.3f} {2:>5} {3:5d} {4:>10}\n".format(att['id'], att['m'],att['dflag'], att['dd'], type)
+############!
+
+# --------------------------------------
+
+
+class Data(object):
+
+    def __init__(self, datafile,debug=False):
+        '''read LAMMPS data file (from data.py in Pizza.py)'''
+        # if debug
+        self.debug=debug
+        # for extract method
+        self.atomtypes = []
+        self.bondtypes = []
+        self.atoms = []
+        self.bonds = []
+        ######
+        self.bdtypes = {} # record bond types
+        ######
+        self.idmap = {}
+
+        self.nselect = 1
+
+        f = open(datafile, "r")
+
+        self.title = f.readline()
+        self.names = {}
+
+        headers = {}
+        while 1:
+            line = f.readline().strip()
+            if '#' in line:
+                line = line[:line.index('#')].strip()
+            if len(line) == 0:
+                continue
+            found = 0
+            for keyword in hkeywords:
+                if keyword in line:
+                    found = 1
+                    words = line.split()
+                    if keyword == "xlo xhi" or keyword == "ylo yhi" or \
+                      keyword == "zlo zhi":
+                        headers[keyword] = (float(words[0]), float(words[1]))
+                    elif keyword == "xy xz yz":
+                        headers[keyword] = \
+                          (float(words[0]), float(words[1]), float(words[2]))
+                    else:
+                        headers[keyword] = int(words[0])
+            if not found:
+                break
+
+        sections = {}
+        while 1:
+            if len(line) > 0:
+                found = 0
+                for pair in skeywords:
+                    keyword, length = pair[0], pair[1]
+                    if keyword == line:
+                        found = 1
+                        if length not in headers:
+                            raise RuntimeError("data section {} "\
+                                  "has no matching header value".format(line))
+                        f.readline()
+                        list_ = []
+                        for _ in range(headers[length]):
+                            list_.append(f.readline())
+                        sections[keyword] = list_
+                if not found:
+                    raise RuntimeError("invalid section {} in data"\
+                                       " file".format(line))
+            #f.readline()
+            line = f.readline()
+            if not line:
+                break
+            if '#' in line:
+                line = line[:line.index('#')]
+            line = line.strip()
+
+        f.close()
+        self.headers = headers
+        self.sections = sections
+
+    def write(self, filename):
+        '''write out a LAMMPS data file (from data.py in Pizza.py)'''
+
+        with open(filename, "w") as f:
+            f.write(self.title + '\n')
+            for keyword in hkeywords:
+                if keyword in self.headers:
+                    if keyword == "xlo xhi" or keyword == "ylo yhi" or \
+                       keyword == "zlo zhi":
+                        f.write("{0:f} {1:f} {2}\n".format(
+                            self.headers[keyword][0],
+                            self.headers[keyword][1], keyword))
+                    elif keyword == "xy xz yz":
+                        f.write("{0:f} {1:f} {2:f} {3}\n".format(
+                            self.headers[keyword][0],
+                            self.headers[keyword][1],
+                            self.headers[keyword][2], keyword))
+                    else:
+                        f.write("{0:d} {1}\n".format(self.headers[keyword],
+                                                   keyword))
+            for pair in skeywords:
+                keyword = pair[0]
+                if keyword in self.sections:
+                    f.write("\n{}\n\n".format(keyword))
+                    for line in self.sections[keyword]:
+                        f.write(line)
+
+    def extract_nonpol(self):
+        """extract atom and bond info from nonpolarizable data"""
+
+        if len(self.atomtypes):
+            return
+
+        # extract atom IDs
+        missinglabels = False
+        for line in self.sections['Masses']:
+            tok = line.split()
+            if len(tok) < 4:
+                print("error: missing type for atom ID " + tok[0] +
+                      " in Masses section")
+                missinglabels = True
+                continue
+            atomtype = {}
+            atomtype['id'] = int(tok[0])
+            atomtype['m'] = float(tok[1])
+            atomtype['type'] = tok[3]
+            atomtype['utype'] = typeinfos[atomtype['type']]['utype']
+            self.atomtypes.append(atomtype)
+
+        if missinglabels:
+            raise RuntimeError("missing atom labels")
+        
+        ######## extract bond IDs
+        for line in self.sections['Bond Coeffs']:
+            tok = line.strip().split()
+            bondtype = {}
+            bondtype['id'] = int(tok[0])
+            bondtype['k'] = float(tok[1])
+            bondtype['r0'] = float(tok[2])
+            bondtype['note'] = ' '.join(tok[3:])
+            self.bondtypes.append(bondtype)
+        ########################
+
+        # extract atom registers
+        for line in self.sections['Atoms']:
+            tok = line.split()
+            atom = {}
+            atom['n'] = int(tok[0])
+            atom['mol'] = int(tok[1])
+            atom['id'] = int(tok[2])
+            atom['q'] = float(tok[3])
+            atom['x'] = float(tok[4])
+            atom['y'] = float(tok[5])
+            atom['z'] = float(tok[6])
+            atom['note'] = ' '.join(tok[7:])
+            self.atoms.append(atom)
+            self.idmap[atom['n']] = atom
+        if self.debug:
+            print(self.idmap[1])
+            print(self.idmap[2])
+
+        for line in self.sections['Bonds']:
+            tok = line.split()
+            bond = {}
+            bond['i'] = int(tok[2])
+            bond['j'] = int(tok[3])
+            bond['id'] = int(tok[1])
+            bond['n'] = int(tok[0])
+            bond['note'] = ' '.join(tok[4:])
+            ##### identify atom types in bond
+            #n_i = bond['i'] - 1
+            #n_j = bond['j'] - 1
+            id_i = self.idmap[bond['i']]['id']
+            id_j = self.idmap[bond['j']]['id']
+            iutype = self.atomtypes[id_i-1]['utype']
+            jutype = self.atomtypes[id_j-1]['utype']
+            ######## make sure that the utype of i is less than or equal to the utype of j, if not, exchange them
+            if iutype <= jutype:
+                bond['iutype'] = iutype
+                bond['jutype'] = jutype
+            else:
+                bond['i'] = int(tok[3])
+                bond['j'] = int(tok[2])
+                bond['iutype'] = jutype
+                bond['jutype'] = iutype
+            n_i = bond['i'] - 1
+            n_j = bond['j'] - 1
+            id_i = self.atoms[n_i]['id'] - 1
+            id_j = self.atoms[n_j]['id'] - 1
+            bond['itype'] = self.atomtypes[id_i]['type']
+            bond['jtype'] = self.atomtypes[id_j]['type']
+            ####### update the atom types in the bond if have not yet
+            ####### iutype is always less than or equal to jutype
+            if 'iutype' not in self.bondtypes[bond['id'] - 1]:
+                id_i = self.idmap[bond['i']]['id']
+                id_j = self.idmap[bond['j']]['id']
+                self.bondtypes[bond['id'] - 1]['iutype'] = bond['iutype']
+                self.bondtypes[bond['id'] - 1]['jutype'] = bond['jutype']
+                self.bondtypes[bond['id'] - 1]['iid'] = self.idmap[bond['i']]['id']
+                self.bondtypes[bond['id'] - 1]['jid'] = self.idmap[bond['j']]['id']
+            ########
+            self.bonds.append(bond)
+        if self.debug:
+            for bdt in self.bondtypes:
+                print(bdt)
+
+
+        if 'Velocities' in self.sections:
+            for line in self.sections['Velocities']:
+                tok = line.split()
+                atom = self.idmap[int(tok[0])]
+                atom['vx'] = float(tok[1])
+                atom['vy'] = float(tok[2])
+                atom['vz'] = float(tok[3])
+
+    def countH(self, output=False):
+        '''count H atoms bonded to each atom type'''
+
+        if len(self.atomtypes) == 0:
+            self.extract_nonpol()
+
+        # count for all atoms
+        nH = [0] * self.headers['atoms']
+        for bd in self.bonds:
+            if bd['itype'][0] in 'Hh':
+                j = bd['j'] - 1
+                nH[j] += 1
+            elif bd['jtype'][0] in 'Hh':
+                i = bd['i'] - 1
+                nH[i] += 1
+        # transfer counts to atom types
+        self.nH = [0] * self.headers['atom types']
+        for att in self.atomtypes:
+            id = att['id']
+            for atom in self.atoms:
+                if atom['id'] == id:
+                    i = atom['n'] - 1
+                    self.nH[id-1] = nH[i]
+                    break
+        if (output):
+            for t, n in zip(self.atomtypes, self.nH):
+                print('{0:8s} {1:1d}'.format(t['type'], n))
+
+
+
+    def polarize(self, drude):
+        """add Drude particles"""
+
+        if 'Pair Coeffs' in self.sections:
+            raise RuntimeError("cannot polarize a data with Pair Coeffs")
+
+        if len(self.atomtypes) == 0:
+            self.extract_nonpol()
+
+        natom = self.headers['atoms']
+        nbond = self.headers['bonds']
+        nattype = self.headers['atom types']
+        nbdtype = self.headers['bond types']
+
+        # create new atom types (IDs) for Drude particles and modify cores
+        newattypes = []
+        for att in self.atomtypes:
+            att['dflag'] = 'n'
+            att['dd'] = 0 # partner drude or core
+            for ddt in drude.types:
+                if ddt['type'] == att['type']:
+                    nattype += 1
+                    newid = {}
+                    newid['id'] = ddt['id'] = nattype
+                    newid['m'] = ddt['dm']
+                    att['m'] -= ddt['dm']
+                    # label drude particles and cores
+                    att['dflag'] = 'c'
+                    att['dd'] = nattype  # partner drude or core
+                    newid['dflag'] = 'd'
+                    newid['dd'] = att['id']  # partner drude or core
+                    newid['type'] = att['type'] + ' DP'
+                    att['type'] += ' DC'
+                    ddt['type'] += ' DC'
+                    newattypes.append(newid)
+                    break
+            ######## !!!!!! continue here
+            ######## >>>>>>>>>>>>> update bondtype infomation  
+            for bdt in self.bondtypes:
+                if bdt['iutype'] == att['utype']:
+                    bdt['idflag'] = att['dflag']
+                if bdt['jutype'] == att['utype']:
+                    bdt['jdflag'] = att['dflag']
+            ######## <<<<<<<<<<<<< update bondtype infomation  
+
+        self.headers['atom types'] += len(newattypes)
+        self.sections['Masses'] = []
+        for att in self.atomtypes + newattypes:
+            self.sections['Masses'].append(massline(att))
+
+        ################:
+        self.updatedatomtypes = self.atomtypes + newattypes
+        # write out the updated atom types into file
+        with open("atom.info", 'w') as file:
+            for uatt in self.updatedatomtypes:
+                file.writelines(attline(uatt))
+        ################!
+
+        # create new bond types for core-drude bonds
+        newbdtypes = []
+        for att in self.atomtypes:
+            for ddt in drude.types:
+                if ddt['type'] == att['type']:
+                    nbdtype += 1
+                    newbdtype = {}
+                    newbdtype['id'] = ddt['bdid'] = nbdtype
+                    newbdtype['k'] = ddt['k']
+                    newbdtype['r0'] = 0.0
+                    newbdtype['note'] = '# ' + ddt['type'] + '-DP'
+                    newbdtypes.append(newbdtype)
+                    break
+
+        self.headers['bond types'] += len(newbdtypes)
+        for bdt in newbdtypes:
+            self.sections['Bond Coeffs'].append(bdtline(bdt))
+
+        ########: create new bond types for cross core-drude bonds
+        newbdtypes2 = []
+        updatedbdtypes = [] # a list that stores the bonds whoes 'k' has been changed
+        for bondtype in self.bondtypes:
+            iid = bondtype['iid']
+            jid = bondtype['jid']
+            idflag = bondtype['idflag']
+            jdflag = bondtype['jdflag']
+            if idflag == 'c' and jdflag == 'c':
+                newbdtype1 = {} # i-core and j-drude
+                newbdtype2 = {} # i-drude and j-core
+                updatedbdtype = {} # the k need to be updated for the core-core bond
+                icmass = self.atomtypes[iid-1]['m']
+                jcmass = self.atomtypes[jid-1]['m']
+                idmass = self.updatedatomtypes[self.atomtypes[iid-1]['dd']-1]['m']
+                jdmass = self.updatedatomtypes[self.atomtypes[jid-1]['dd']-1]['m']
+                # create the first new type
+                nbdtype += 1
+                newbdtype1['id'] = nbdtype
+                newbdtype1['k'] = bondtype['k'] * (jdmass / (jcmass+jdmass) )
+                newbdtype1['r0'] = bondtype['r0'] 
+                newbdtype1['iid'] = iid
+                newbdtype1['jid'] = self.atomtypes[jid-1]['dd']
+                newbdtype1['note'] = "# " + self.atomtypes[iid-1]['utype'].split()[0] + "-DC " +  self.atomtypes[jid-1]['utype'].split()[0] + "-DP"
+                newbdtype1['dd'] = bondtype['id'] # partner bond
+                newbdtype1['ddtype'] = 0 # 0 means i core bonded to j drude
+                newbdtype1['ddflag'] = 'cc'
+                newbdtypes2.append(newbdtype1)
+                # create the second new type
+                nbdtype += 1
+                newbdtype2['id'] = nbdtype
+                newbdtype2['k'] = bondtype['k'] * (idmass / (icmass+idmass) )
+                newbdtype2['r0'] = bondtype['r0'] 
+                newbdtype2['iid'] = jid
+                newbdtype2['jid'] = self.atomtypes[iid-1]['dd']
+                newbdtype2['note'] = "# " + self.atomtypes[jid-1]['utype'].split()[0] + "-DC " +  self.atomtypes[iid-1]['utype'].split()[0] + "-DP"
+                newbdtype2['dd'] = bondtype['id']
+                newbdtype2['ddtype'] = 1 # 1 means i drude bonded to j core
+                newbdtype2['ddflag'] = 'cc'
+                newbdtypes2.append(newbdtype2)
+                # create updated core-core bond
+                updatedbdtype = deepcopy(bondtype)
+                # print(1 - (idmass / (icmass+idmass) ) - (jdmass / (jcmass+jdmass) ))
+                updatedbdtype['k'] -= newbdtype1['k']  - newbdtype2['k'] 
+                updatedbdtype['ddflag'] = 'cc'
+                updatedbdtype['dd0'] = newbdtype1['id']
+                updatedbdtype['dd1'] = newbdtype2['id']
+                updatedbdtypes.append(updatedbdtype)
+            elif idflag == 'c' and jdflag == 'n':
+                if not (self.atomtypes[jid - 1]['type'][0] in "hH"):
+                    newbdtype1 = {} # i-drude and j-n
+                    updatedbdtype = {} # the k need to be updated for the core-core bond
+                    icmass = self.atomtypes[iid-1]['m']
+                    idmass = self.updatedatomtypes[self.atomtypes[iid-1]['dd']-1]['m']
+                    # create the new type
+                    nbdtype += 1
+                    newbdtype1['id'] = nbdtype
+                    newbdtype1['k'] = bondtype['k'] * (idmass / (icmass+idmass) )
+                    newbdtype1['r0'] = bondtype['r0'] 
+                    newbdtype1['iid'] = jid
+                    newbdtype1['jid'] = self.atomtypes[iid-1]['dd']
+                    newbdtype1['note'] = "# " + self.atomtypes[jid-1]['utype'].split()[0] + "-N " +  self.atomtypes[iid-1]['utype'].split()[0] + "-DP"
+                    newbdtype1['dd'] = bondtype['id']
+                    newbdtype1['ddtype'] = 2 # 2 means i drude particle bonded to j non
+                    newbdtype1['ddflag'] = 'cn'
+                    newbdtypes2.append(newbdtype1)
+                    # create updated core-core bond
+                    updatedbdtype = deepcopy(bondtype)
+                    updatedbdtype['k'] -= newbdtype1['k']
+                    updatedbdtype['dd'] = newbdtype1['id']
+                    updatedbdtype['ddflag'] = 'cn'
+                    
+                    updatedbdtypes.append(updatedbdtype)
+                else:
+                    updatedbdtype = deepcopy(bondtype)
+                    updatedbdtype['dd'] = 0
+                    updatedbdtype['ddflag'] = 'ch'
+                    updatedbdtypes.append(updatedbdtype)
+            elif idflag == 'n' and jdflag == 'c' :
+                if not (self.atomtypes[iid - 1]['type'][0] in "hH"):
+                    newbdtype1 = {} # i-n and j-drude
+                    updatedbdtype = {} # the k need to be updated for the core-core bond
+                    jcmass = self.atomtypes[jid-1]['m']
+                    jdmass = self.updatedatomtypes[self.atomtypes[jid-1]['dd']-1]['m']
+                    # create the new type
+                    nbdtype += 1
+                    newbdtype1['id'] = nbdtype
+                    newbdtype1['k'] = bondtype['k'] * (jdmass / (jcmass+jdmass) )
+                    newbdtype1['r0'] = bondtype['r0'] 
+                    newbdtype1['iid'] = iid
+                    newbdtype1['jid'] = self.atomtypes[jid-1]['dd']
+                    newbdtype1['note'] = "# " + self.atomtypes[iid-1]['utype'].split()[0] + "-N " +  self.atomtypes[jid-1]['utype'].split()[0] + "-DP"
+                    newbdtype1['dd'] = bondtype['id']
+                    newbdtype1['ddtype'] = 3 # 0 means i non bonded to j drude particle
+                    newbdtype1['ddflag'] = 'nc'
+                    newbdtypes2.append(newbdtype1)
+                    # create updated core-core bond
+                    updatedbdtype = deepcopy(bondtype)
+                    updatedbdtype['k'] *= (1 - (jdmass / (jcmass+jdmass) )) 
+                    updatedbdtype['dd'] = newbdtype1['id']
+                    updatedbdtype['ddflag'] = 'nc'
+                    updatedbdtypes.append(updatedbdtype)
+                else:
+                    updatedbdtype = deepcopy(bondtype)
+                    updatedbdtype['dd'] = 0
+                    updatedbdtype['ddflag'] = 'hc'
+                    updatedbdtypes.append(updatedbdtype)
+            elif idflag == 'n' and jdflag == 'n':
+                updatedbdtype = deepcopy(bondtype)
+                updatedbdtype['dd'] = 0
+                updatedbdtype['ddflag'] = 'nn'
+                updatedbdtypes.append(updatedbdtype)
+            else:
+                raise RuntimeError(f"Unknown dflag for bond type {bondtype['id']}, type i {bondtype['iid']} with dflag {self.atomtypes[iid - 1]['dflag']} and type j {bondtype['jid']} with dflag {self.atomtypes[jid - 1]['dflag']}")
+
+        if self.debug:
+            for bdt in updatedbdtypes:
+                print(bdt)
+            for bdt in newbdtypes+newbdtypes2:
+                print(bdt)
+        #########!
+
+        #########:
+        self.headers['bond types'] += len(newbdtypes2)
+        for bdt in newbdtypes2:
+            self.sections['Bond Coeffs'].append(bdtline(bdt))
+        #########!
+
+        #########:
+        for ubdt in updatedbdtypes:
+            bdid = ubdt['id']
+            # print(ubdt)
+            self.sections['Bond Coeffs'][bdid - 1] = bdtline(ubdt)
+        self.updatedbondtypes = updatedbdtypes
+        #########!
+
+        # create new atoms for Drude particles and new bonds with their cores
+        random.seed(123)
+        newatoms = []
+        newbonds = []
+        for atom in self.atoms:
+            atom['dflag'] = ''           # [c]ore, [d]rude, [n]on-polarizable
+            atom['dd'] = 0               # partner drude or core
+            for att in self.atomtypes:
+                if att['id'] == atom['id']:
+                    break
+            for ddt in drude.types:
+                if ddt['type'] == att['type']:
+                    natom += 1
+                    newatom = deepcopy(atom)
+                    newatom['n'] = natom
+                    self.idmap[natom] = newatom
+                    newatom['id'] = ddt['id']
+                    newatom['q'] = ddt['dq'] + atom['q']*ddt['dm']/(ddt['dm']+att['m'])
+                    newatom['note'] = atom['note']
+                    if '#' not in newatom['note']:
+                        newatom['note'] += ' #'
+                    newatom['note'] += ' DP'
+                    newatom['dflag'] = 'd'
+                    newatom['dd'] = atom['n']
+
+                    # avoid superposition of cores and Drudes
+                    newatom['x'] += 0.05 * (random.random() - 0.5)
+                    newatom['y'] += 0.05 * (random.random() - 0.5)
+                    newatom['z'] += 0.05 * (random.random() - 0.5)
+                    if 'Velocities' in self.sections:
+                        newatom['vx'] = atom['vx']
+                        newatom['vy'] = atom['vy']
+                        newatom['vz'] = atom['vz']
+
+                    newatoms.append(newatom)
+                    atom['q'] -= newatom['q']
+                    atom['dflag'] = 'c'
+                    atom['dd'] = natom
+                    if '#' not in atom['note']:
+                        atom['note'] += ' #'
+                    atom['note'] += ' DC'
+
+                    nbond += 1
+                    newbond = {}
+                    newbond['n'] = nbond
+                    newbond['id'] = ddt['bdid']
+                    newbond['i'] = atom['n']
+                    newbond['j'] = newatom['n']
+                    newbond['note'] = '# ' + ddt['type'] + '-DP'
+                    newbonds.append(newbond)
+                    break
+        ################: start add bonds between different drude particles and drude cores
+        newbonds2 = []
+        for bond in self.bonds:
+            # print(self.bondtypes[bond['id'] - 1])
+            bond['ddflag'] = self.updatedbondtypes[bond['id'] - 1]['ddflag'] # [cc],[cn],[nc],[nn],[ch],[hc]
+            bond['dd'] = 0
+            bond['dd0'] = 0
+            bond['dd1'] = 0
+            bdid = bond['id']
+            n_i = bond['i']
+            n_j = bond['j']
+            iid = self.idmap[n_i]['id']
+            jid = self.idmap[n_j]['id']
+            if bond['ddflag'] == 'cc':
+                n_id = self.idmap[n_i]['dd'] # the atom id of the i drude particle
+                n_jd = self.idmap[n_i]['dd'] # the atom id of the j drude particle
+                # dd0, i core with j drude
+                nbond += 1
+                newbond = {}
+                newbond['n'] = nbond
+                newbond['id'] = self.updatedbondtypes[bdid - 1]['dd0']
+                newbond['i'] = n_i
+                newbond['j'] = n_jd
+                newbond['dd'] = bdid
+                newbond['ddtype'] = 0
+                newbond['ddflag'] = 'cc'
+                newbond['note'] = "# " + self.atomtypes[iid-1]['utype'].split()[0] + "-DC " +  self.atomtypes[jid-1]['utype'].split()[0] + "-DP"
+                newbonds2.append(newbond)
+                bond['dd0'] = nbond
+                # dd1, j core with i drude
+                nbond += 1
+                newbond = {}
+                newbond['n'] = nbond
+                newbond['id'] = self.updatedbondtypes[bdid - 1]['dd1']
+                newbond['i'] = n_j
+                newbond['j'] = n_id
+                newbond['dd'] = bdid
+                newbond['ddtype'] = 1
+                newbond['ddflag'] = 'cc'
+                newbond['note'] = "# " + self.atomtypes[jid-1]['utype'].split()[0] + "-DC " +  self.atomtypes[iid-1]['utype'].split()[0] + "-DP"
+                newbonds2.append(newbond)
+                bond['dd1'] = nbond
+                # update bond
+                bond['i'] = n_i
+                bond['j'] = n_j
+                bond['note'] = "# "+ self.atomtypes[iid-1]['utype'].split()[0] + "-DC " +  self.atomtypes[jid-1]['utype'].split()[0] + "-DC"
+            elif bond['ddflag'] == 'cn':
+                n_id = self.idmap[n_i]['dd'] # the atom id of the i drude particle
+                # dd2, i drude with j drude
+                nbond += 1
+                newbond = {}
+                newbond['n'] = nbond
+                newbond['id'] = self.updatedbondtypes[bdid - 1]['dd0']
+                newbond['i'] = n_j
+                newbond['j'] = n_id
+                newbond['dd'] = bdid
+                newbond['ddtype'] = 2
+                newbond['ddflag'] = 'cn'
+                newbond['note'] = "# "+ self.atomtypes[jid-1]['utype'].split()[0] + "-N " +  self.atomtypes[iid-1]['utype'].split()[0] + "-DP"
+                newbonds2.append(newbond)
+                bond['dd'] = nbond
+                # update bond
+                bond['i'] = n_i
+                bond['j'] = n_j
+                bond['note'] = "# "+ self.atomtypes[iid-1]['utype'].split()[0] + "-DC " +  self.atomtypes[jid-1]['utype'].split()[0] + "-N"
+            elif bond['ddflag'] == 'nc':
+                n_jd = self.idmap[n_j]['dd'] # the atom id of the j drude particle
+                # dd2, i drude with j drude
+                nbond += 1
+                newbond = {}
+                newbond['n'] = nbond
+                newbond['id'] = self.updatedbondtypes[bdid - 1]['dd0']
+                newbond['i'] = n_i
+                newbond['j'] = n_jd
+                newbond['dd'] = bdid
+                newbond['ddtype'] = 2
+                newbond['ddflag'] = 'nc'
+                newbond['note'] = "# "+ self.atomtypes[iid-1]['utype'].split()[0] + "-N " +  self.atomtypes[jid-1]['utype'].split()[0] + "-DP"
+                newbonds2.append(newbond)
+                bond['dd'] = nbond
+                # update bond
+                bond['i'] = n_i
+                bond['j'] = n_j
+                bond['note'] = "# "+ self.atomtypes[iid-1]['utype'].split()[0] + "-N " +  self.atomtypes[jid-1]['utype'].split()[0] + "-DC"
+            elif bond['ddflag'] == 'nn':
+                # update bond
+                bond['i'] = n_i
+                bond['j'] = n_j
+                bond['note'] = "# "+ self.atomtypes[iid-1]['utype'].split()[0] + "-N " +  self.atomtypes[jid-1]['utype'].split()[0] + "-N"
+            elif bond['ddflag'] == 'ch':
+                # update bond
+                bond['i'] = n_i
+                bond['j'] = n_j
+                bond['note'] = "# "+ self.atomtypes[iid-1]['utype'].split()[0] + "-DC " +  self.atomtypes[jid-1]['utype'].split()[0] + "-N"
+            elif bond['ddflag'] == 'hc':
+                # update bond
+                bond['i'] = n_i
+                bond['j'] = n_j
+                bond['note'] = "# "+ self.atomtypes[iid-1]['utype'] + "-N " +  self.atomtypes[jid-1]['utype'] + "-DC"
+                
+            
+
+
+
+        ################!
+        self.headers['atoms'] += len(newatoms)
+        self.headers['bonds'] += len(newbonds)
+        ################?
+        self.headers['bonds'] += len(newbonds2)
+        ################!
+        self.sections['Atoms'] = []
+        self.sections['Bonds'] = []
+        for atom in self.atoms + newatoms:
+            self.sections['Atoms'].append(atomline(atom))
+        for bond in self.bonds + newbonds + newbonds2 :
+            self.sections['Bonds'].append(bondline(bond))
+        if 'Velocities' in self.sections:
+            self.sections['Velocities'] = []
+            for atom in self.atoms + newatoms:
+                self.sections['Velocities'].append(velline(atom))
+
+        # update list of atom IDs
+        for att in newattypes:
+            self.atomtypes.append(att)
+
+
+    def extract_pol(self):
+        """extract atom, drude, bonds info from polarizable data"""
+
+        # extract atom IDs
+        for line in self.sections['Masses']:
+            tok = line.split()
+            atomtype = {}
+            atomtype['id'] = int(tok[0])
+            atomtype['m'] = float(tok[1])
+            if len(tok) >= 4:
+                atomtype['type'] = tok[3]
+                atomtype['dflag'] = 'n'
+                if tok[-1] == "DC":
+                    atomtype['dflag'] = 'c'
+                elif tok[-1] == "DP":
+                    atomtype['dflag'] = 'd'
+                print(atomtype['dflag'])
+            else:
+                raise RuntimeError("comments in Masses section required "\
+                                   "to identify cores (DC) and Drudes (DP)")
+            self.atomtypes.append(atomtype)
+                        
+        # extract bond type data
+        for line in self.sections['Bond Coeffs']:
+            tok = line.split()
+            bondtype = {}
+            bondtype['id'] = int(tok[0])
+            bondtype['k'] = float(tok[1])
+            bondtype['r0'] = float(tok[2])
+            bondtype['note'] = ''.join([s + ' ' for s in tok[3:]]).strip()
+            self.bondtypes.append(bondtype)
+
+        # extract atom registers
+        for line in self.sections['Atoms']:
+            tok = line.split()
+            atom = {}
+            atom['n'] = int(tok[0])
+            atom['mol'] = int(tok[1])
+            atom['id'] = int(tok[2])
+            atom['q'] = float(tok[3])
+            atom['x'] = float(tok[4])
+            atom['y'] = float(tok[5])
+            atom['z'] = float(tok[6])
+            # atom['note'] = ''.join([s + ' ' for s in tok[7:-1]]).strip()
+            if tok[-1] == 'DC':
+              atom['note'] = ' '.join(tok[7:-1])
+            else:
+              atom['note'] = ' '.join(tok[7:])
+            self.atoms.append(atom)
+            self.idmap[atom['n']] = atom
+
+        if 'Velocities' in self.sections:
+            for line in self.sections['Velocities']:
+                tok = line.split()
+                atom = self.idmap[int(tok[0])]
+                atom['vx'] = float(tok[1])
+                atom['vy'] = float(tok[2])
+                atom['vz'] = float(tok[3])
+
+        # extract bond data
+        for line in self.sections['Bonds']:
+            tok = line.split()
+            bond = {}
+            bond['n'] = int(tok[0])
+            bond['id'] = int(tok[1])
+            bond['i'] = int(tok[2])
+            bond['j'] = int(tok[3])
+            bond['note'] = ''.join([s + ' ' for s in tok[4:]]).strip()
+            self.bonds.append(bond)
+
+        if 'Velocities' in self.sections:
+            for line in self.sections['Velocities']:
+                tok = line.split()
+                atom = self.idmap[int(tok[0])]
+                atom['vx'] = float(tok[1])
+                atom['vy'] = float(tok[2])
+                atom['vz'] = float(tok[3])
+
+    def depolarize(self):
+        """remove Drude particles"""
+
+        self.extract_pol()
+
+        atom_tp_map = {}
+        bond_tp_map = {}
+        atom_map = {}
+        bond_map = {}
+        q = {}
+        atom_tp = {}
+        m = {}
+
+        for att in self.atomtypes:
+            if att['dflag'] != 'd':
+                atom_tp_map[att['id']] = len(atom_tp_map) + 1
+            m[att['id']] = att['m']
+        print(atom_tp_map)
+        for atom in self.atoms:
+            if atom['id'] in atom_tp_map:
+                atom_map[atom['n']] = len(atom_map) + 1
+            q[atom['n']] = atom['q']
+            atom_tp[atom['n']] = atom['id']
+        for bond in self.bonds:
+            if bond['i'] in atom_map and bond['j'] in atom_map:
+                bond_map[bond['n']] = len(bond_map) + 1
+                if bond['id'] not in bond_tp_map:
+                    bond_tp_map[bond['id']] = len(bond_tp_map) + 1
+            else:
+                if bond['i'] in atom_map:
+                    q[bond['i']] += q[bond['j']]
+                    if atom_tp[bond['j']] in m:
+                        m[atom_tp[bond['i']]] += m.pop(atom_tp[bond['j']])
+                else:
+                    q[bond['j']] += q[bond['i']]
+                    if atom_tp[bond['i']] in m:
+                        m[atom_tp[bond['j']]] += m.pop(atom_tp[bond['i']])
+
+        size = len(self.atomtypes)
+        for iatom_tp in reversed(range(size)):
+            att = self.atomtypes[iatom_tp]
+            if att['id'] not in atom_tp_map:
+                del self.atomtypes[iatom_tp]
+            else:
+                att['m'] = m[att['id']]
+                att['id'] = atom_tp_map[att['id']]
+
+        size = len(self.bondtypes)
+        for ibond_tp in reversed(range(size)):
+            bdt = self.bondtypes[ibond_tp]
+            if bdt['id'] not in bond_tp_map:
+                del self.bondtypes[ibond_tp]
+            else:
+                bdt['id'] = bond_tp_map[bdt['id']]
+
+        size = len(self.atoms)
+        for iatom in reversed(range(size)):
+            atom = self.atoms[iatom]
+            if atom['n'] not in atom_map:
+                del self.atoms[iatom]
+            else:
+                atom['q'] = q[atom['n']]
+                atom['n'] = atom_map[atom['n']]
+                atom['id'] = atom_tp_map[atom['id']]
+
+        size = len(self.bonds)
+        for ibond in reversed(range(size)):
+            bond = self.bonds[ibond]
+            if bond['n'] not in bond_map:
+                del self.bonds[ibond]
+            else:
+                bond['n'] = bond_map[bond['n']]
+                bond['id'] = bond_tp_map[bond['id']]
+                bond['i'] = atom_map[bond['i']]
+                bond['j'] = atom_map[bond['j']]
+
+        self.sections['Atoms'] = []
+        for atom in self.atoms:
+            self.sections['Atoms'].append(atomline(atom))
+        self.headers['atoms'] = len(self.atoms)
+        self.sections['Masses'] = []
+        for att in self.atomtypes:
+            self.sections['Masses'].append(massline(att))
+        self.headers['atom types'] = len(self.atomtypes)
+        self.sections['Bonds'] = []
+        for bond in self.bonds:
+            self.sections['Bonds'].append(bondline(bond))
+        self.headers['bonds'] = len(self.bonds)
+        self.sections['Bond Coeffs'] = []
+        for bdt in self.bondtypes:
+            self.sections['Bond Coeffs'].append(bdtline(bdt))
+        self.headers['bond types'] = len(self.bondtypes)
+
+        if 'Velocities' in self.sections:
+            self.sections['Velocities'] = []
+            for atom in self.atoms:
+                self.sections['Velocities'].append(velline(atom))
+
+
+    def writepairfile (self, pairfile, drude, thole, att_id):
+        """print pair_style thole"""
+
+        with open(pairfile, "w") as f:
+            f.write("# interactions involving Drude particles\n")
+            f.write("pair_coeff    * {0:3d}* coul/long/cs\n".format(att_id))
+
+            f.write("# Thole dipole-dipole damping if more than "\
+                    "1 Drude per molecule\n")
+            # Thole parameters for I,J pairs
+            ifound = False
+            for atti in self.atomtypes:
+                itype = atti['type'].split()[0]
+                for ddt in drude.types:
+                    dtype = ddt['type'].split()[0]
+                    if dtype == itype:
+                        alphai = ddt['alpha']
+                        tholei = ddt['thole']
+                        ifound = True
+                        break
+                jfound = False
+                for attj in self.atomtypes:
+                    if attj['id'] < atti['id']:
+                        continue
+                    jtype = attj['type'].split()[0]
+                    for ddt in drude.types:
+                        dtype = ddt['type'].split()[0]
+                        if dtype == jtype:
+                            alphaj = ddt['alpha']
+                            tholej = ddt['thole']
+                            jfound = True
+                            break
+                    if ifound and jfound:
+                        alphaij = (alphai * alphaj)**0.5
+                        tholeij = (tholei + tholej) / 2.0
+                        if tholeij == thole:
+                            f.write("pair_coeff {0:4} {1:4} thole "\
+                                  "{2:7.3f}\n".format(atti['id'], attj['id'],
+                                                      alphaij))
+                        else:
+                            f.write("pair_coeff {0:4} {1:4} thole {2:7.3f} "\
+                                  "{3:7.3f}\n".format(atti['id'],attj['id'],
+                                                        alphaij, tholeij))
+                    jfound = False
+                ifound = False
+          
+    def lmpscript(self, drude, outdfile, thole = 2.6, cutoff = 12.0):
+        """print lines for input script, including pair_style thole"""
+
+        inpstack = "in-p.lmp"
+        pairfile = "pair-drude.lmp"
+        
+        dfound = False
+        for att in self.atomtypes:
+            if att['dflag'] == 'd':
+                dfound = True
+                break
+        if not dfound:
+            print("No polarizable atoms found.")
+            return
+
+        print("Commands for the LAMMPS input script to handle "\
+              "polarization written to " + inpstack)
+        print("Pair coefficients for Thole damping "\
+              "written to " + pairfile)
+        print("LAMMPS data file with Drude dipoles "\
+              "written to " + outdfile)
+
+        with open(inpstack, 'w') as f:
+            f.write("# Commands to include in the LAMMPS input stack\n\n")
+
+            f.write("# adapt the pair_style command as needed\n")
+            f.write("pair_style hybrid/overlay [...] coul/long/cs {0:.1f} "\
+                  "thole {1:.3f} {0:.1f}\n\n".format(cutoff, thole))
+
+            f.write("# new data file with Drude oscillators added\n")
+            f.write("read_data {0}\n\n".format(outdfile))
+
+            f.write("# read pair interactions involving Drude particles\n")
+            f.write("# Thole damping recommended if more than 1 Drude "\
+                    "per molecule\n")
+            f.write("include {0}\n\n".format(pairfile))
+
+            self.writepairfile(pairfile, drude, thole, att['id'])
+
+            f.write("# convenient atom groups (for shake, thermostats...)\n")
+            gatoms = gcores = gdrudes = ""
+            for att in self.atomtypes:
+                if att['dflag'] != 'd':
+                    gatoms += " {0}".format(att['id'])
+                if att['dflag'] == 'c':
+                    gcores += " {0}".format(att['id'])
+                if att['dflag'] == 'd':
+                    gdrudes += " {0}".format(att['id'])
+            f.write("group ATOMS type" + gatoms + "\n")
+            f.write("group CORES type" + gcores + "\n")
+            f.write("group DRUDES type" + gdrudes + "\n\n")
+
+            f.write("# identify each atom type: "\
+                    "[C]ore, [D]rude, [N]on-polarizable\n")
+            drudetypes = ""
+            for att in self.atomtypes:
+                drudetypes += " {0}".format(att['dflag'].upper())
+            f.write("fix DRUDE all drude" + drudetypes + "\n\n")
+
+            f.write("# store velocity information of ghost atoms\n")
+            f.write("comm_modify vel yes\n\n")
+
+            f.write("variable TK equal 300.0\n")
+            f.write("variable TDRUDE equal 1.0\n")
+            f.write("variable PBAR equal 1.0\n\n")
+        
+            f.write("# temperature-grouped multiple Nose-Hoover thermostats "\
+                    " and barostat\n")
+            f.write("fix TSTAT all tgnpt/drude temp ${TK} ${TK} 100 "\
+                    "${TDRUDE} 20 iso ${PBAR} ${PBAR} 1000\n\n")
+
+            f.write("# zero linear momentum (may not be needed)\n")
+            f.write("fix ICECUBE all momentum 1000 linear 1 1 1\n\n")
+
+            f.write("# output the temperatures of molecular COM, "\
+                    "COM of DC-DP, and DP\n")
+            f.write("thermo_style custom step [...] "\
+                    "f_TSTAT[1] f_TSTAT[2] f_TSTAT[3]\n\n")
+
+            i = drudetypes.find("D")
+
+            f.write("# write Drude particles to dump file\n")
+            f.write("dump_modify ... element ... " + drudetypes[i:] + "\n\n")
+
+            f.write("# ATTENTION!\n")
+            f.write("#  * read_data may need 'extra/special/per/atom' keyword, "
+                  "LAMMPS will exit with a message\n")
+            f.write("#  * if using fix shake the group-ID must not include "
+              "Drude particles; use group ATOMS\n")
+            f.write("#  * give all I<=J pair interactions, no mixing\n")
+            f.write("#  * pair style coul/long/cs from CORESHELL package is "\
+                  "used for interactions of DP;\n")
+            f.write("#    alternatively pair lj/cut/thole/long could be used "\
+                  "avoiding hybrid/overlay and\n")
+            f.write("#    allowing mixing; see doc pages.\n")
+
+# --------------------------------------
+
+kcal =  4.184                           # kJ
+eV   = 96.485                           # kJ/mol
+fpe0 =  0.000719756                     # (4 Pi eps0) in e^2/(kJ/mol A)
+
+
+class Drude(object):
+    """specification of drude oscillator types"""
+
+    def __init__(self, drudefile, data, kcalc=False, positive=False, metal=False,debug=False):
+        self.types = []
+        self.alpha_H = 0.323           # PCCP 20(2018)10992
+
+        with open(drudefile, "r") as f:
+
+            # search for polarizability of H
+            for line in f:
+                line = line.strip()
+                if line.startswith('#') or len(line) == 0:
+                    continue
+                if line.startswith('H'):
+                    tok = line.split()
+                    self.alpha_H = float(tok[4])
+                    break
+            print('Polarizability of H merged into heavy atoms: {0:.3f} A3'.format(self.alpha_H))
+            f.seek(0)
+
+            data.countH(debug)
+            
+            for line in f:
+                line = line.strip()
+                if line.startswith('#') or len(line) == 0:
+                    continue
+                tok = line.split()
+
+                if tok[0].startswith('H'):
+                    if float(tok[4]) != self.alpha_H:
+                        print('warning: different polarizabilities for H')
+                    continue
+
+                drude = {}
+                drude['type'] = tok[0]
+                drude['dm'] = float(tok[1])
+                dq = float(tok[2])
+                k = float(tok[3])
+                alpha = float(tok[4])
+                drude['thole'] = float(tok[5])
+
+                for att in data.atomtypes:
+                    if att['type'] == drude['type']:
+                        id = att['id'] - 1
+                        alpha += data.nH[id] * self.alpha_H
+                        break
+                drude['alpha'] = alpha
+
+                if kcalc:
+                    k = dq*dq / (fpe0 * alpha)
+                else:
+                    dq = (fpe0 * k * alpha)**0.5
+
+                if positive:
+                    drude['dq'] = abs(dq)
+                else:
+                    drude['dq'] = -abs(dq)
+
+                if metal:
+                    drude['k'] = k / (2.0 * eV)
+                else:
+                    drude['k'] = k / (2.0 * kcal)
+
+                self.types.append(drude)
+
+
+# --------------------------------------
+
+
+def main():
+    parser = argparse.ArgumentParser(description = usage,
+             formatter_class = argparse.RawTextHelpFormatter)
+    parser.add_argument('-f', '--ffdrude', default = 'alpha.ff',
+                        help = 'Drude parameter file (default: alpha.ff)')
+    parser.add_argument('-k', '--kcalc', action = 'store_true',
+                        help = 'Drude force constants calculated from '\
+                        'polarizability (default: k from parameter file '\
+                        'and q from polarizability)')
+    parser.add_argument('-p', '--positive', action = 'store_true',
+                        help = 'Drude particles with positive charge '\
+                        '(default: negative charge)')
+    parser.add_argument('-t', '--thole', type = float, default = 2.6,
+                        help = 'global Thole damping parameter (default: 2.6)')
+    parser.add_argument('-c', '--cutoff', type = float, default = 12.0,
+                        help = 'global distance cutoff/A (default: 12.0)')
+    parser.add_argument('-m', '--metal', action = 'store_true',
+                        help = 'LAMMPS metal units (default: real units)')
+    parser.add_argument('-d', '--depolarize', action = 'store_true',
+                        help = 'remove Drude dipole polarization from '\
+                        'LAMMPS data file')
+    parser.add_argument('-dbg','--debug',type= bool,default = False, help = 'if debug this script')
+    parser.add_argument('infile', help = 'input LAMMPS data file')
+    parser.add_argument('outfile', help = 'output LAMMPS data file')
+    
+    args = parser.parse_args()
+
+    data = Data(args.infile,args.debug)
+    if not args.depolarize:
+        drude = Drude(args.ffdrude, data, args.kcalc, args.positive, args.metal,args.debug)
+        data.polarize(drude)
+        data.lmpscript(drude, args.outfile, args.thole, args.cutoff)
+    else:
+        data.depolarize()
+    data.write(args.outfile)
+
+
+if __name__ == '__main__':
+    main()
