@@ -336,8 +336,12 @@ class RaptorReader(object):
         print("Initialized RaptorReader class for file {}...".format(self.filename))
         print("n_complexes: ", self.n_complexes, ", n_frames: ", self.n_frames, ", has_center_location: ", self.frame._has_center_location, ", has_n_states: ", self.frame._has_n_states, ", has_states_info: ", self.frame._has_states_info, ", has_energy: ", self.frame._has_energy, ", has_decomposed_energy: ", self.frame._has_decomposed_energy)
 
-file="44_10frames.evb"
-reader = RaptorReader(file)
-for frame in reader:
-    print("frame index: ", frame.index, "frame timestep: ",frame.timestep, "frame number of complexes: ", frame.n_complexes, "frame all complexes information: ", frame.complexes, "\nframe complex 1: ", frame.get_complex(0))
-    # print(frame.index, frame.timestep, frame.n_complexes, frame.center_location, frame.energy, frame.decomposed_env_energy, frame.complexes, frame.get_complex(0))
+def test(filename):
+    reader = RaptorReader(filename)
+    for frame in reader:
+        print("frame index: ", frame.index, "frame timestep: ",frame.timestep, "frame number of complexes: ", frame.n_complexes, "frame all complexes information: ", frame.complexes, "\nframe complex 1: ", frame.get_complex(0))
+        # print(frame.index, frame.timestep, frame.n_complexes, frame.center_location, frame.energy, frame.decomposed_env_energy, frame.complexes, frame.get_complex(0))
+
+if __name__ == "__main__":
+    file="44_10frames.evb"
+    test(file)
