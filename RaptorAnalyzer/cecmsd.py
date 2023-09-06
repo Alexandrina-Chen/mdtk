@@ -86,9 +86,9 @@ def calc_cec_msd(positions: np.array, pivot_ids: np.array):
             msd_d[i, :, k] = tidynamics.msd(positions_d[i, :, k])
             msd_c[i, :, k] = tidynamics.msd(positions_c[i, :, k])
             msd[i, :, k] = tidynamics.msd(positions[i, :, k])
-        msd_d[i, :, -1] = tidynamics.msd(positions_d[i, :, :])
-        msd_c[i, :, -1] = tidynamics.msd(positions_c[i, :, :])
-        msd[i, :, -1] = tidynamics.msd(positions[i, :, :])
+        msd_d[i, :, -1] = np.sum(msd_d[i, :, :-1], axis=1)
+        msd_c[i, :, -1] = np.sum(msd_c[i, :, :-1], axis=1)
+        msd[i, :, -1] = np.sum(msd[i, :, :-1], axis=1)
     return msd_d, msd_c, msd
     
 
