@@ -3,5 +3,4 @@ __author__="Sijia Chen"
 
 from .DrudeOscillator import *
 from .OpenMMTools import *
-from .RaptorParser import *
-from .RaptorAnalyzer import *
+from .Parser import *
