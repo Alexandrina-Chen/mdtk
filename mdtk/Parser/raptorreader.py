@@ -191,7 +191,17 @@ class RaptorReader(object):
             # if reach the last frame
             if frame.index == len(self)-1:
                 line = f.readline()
-                lines.append(line)
+                # I found a new possible error: 
+                # if the last frame we want is 1000, but the actual last frame is 1001, then the reader will possible read two frames into the "last frame"
+                # to avoid this, we need to check if the line is empty
+                # then we need to check if the line is the "END_OF_COMPLEX {n_complexes}" line
+                # if is, then we need to break the loop
+                if line: # The readline() method doesn't trigger the end-of-file condition. Instead, when data is exhausted, it returns an empty string.
+                    if line.startswith("END_OF_COMPLEX {}".format(n_complexes)):
+                        lines.append(line)
+                        break
+                    else:
+                        lines.append(line)
             # if not reach the last frame
             elif line == True: # handle the first line of the frame
                 line = f.readline()
