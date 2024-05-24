@@ -42,9 +42,9 @@ class LammpsReader(object):
     # todo: add support for reading in multiple trajectory files; "_n_frames" should be the total number of frames in all trajectory files, therefore it should be a class property
     # maybe "_n_frames", "_offsets", "_cached" should be class properties? a experiment for now
     # a example of class property: https://stackoverflow.com/questions/5189699/how-to-make-a-class-property
-    _n_frames = 0
-    _frame = LammpsFrame
-    _offsets = []
+    # _n_frames = 0
+    # _frame = LammpsFrame
+    # _offsets = []
 
     def __init__(self, filename, verbose = False,**kwargs) -> None:
 
@@ -52,6 +52,11 @@ class LammpsReader(object):
         self.filename = filename
         self._check_sanity_filename()
         self._verbose = verbose # if True, print out more information. Mostly for debugging purpose
+
+        # initialize the number of frames and the frame class
+        self._n_frames = 0
+        self._frame = LammpsFrame
+        self._offsets = []
 
         # initialize frame class-related arguments
         self._frame_kwargs = self._parse_frame_kwargs(kwargs)
@@ -258,8 +263,10 @@ class LammpsReader(object):
         frame : RaptorFrame
             Frame object.
         """
-        self._index = index-1
-        self._file.seek(self._offsets[index])
+        if index < 0 or index >= len(self):
+            raise IndexError("Index out of range!")
+        self.frame.index = index-1
+        # self._file.seek(self._offsets[index])
         return self._read_next_frame()
     
     def __getitem__(self, index) -> LammpsFrame:
@@ -374,6 +381,47 @@ class LammpsReader(object):
                  )
         
         self._has_initialized = True
+
+    @property
+    def unwrapped_positions(self):
+        if not self._has_unwrapped_positions:
+            raise AttributeError("This trajectory file does not have unwrapped positions!")
+        return self.frame.unwrapped_positions
+    
+    @property
+    def wrapped_positions(self):
+        if not self._has_wrapped_positions:
+            raise AttributeError("This trajectory file does not have wrapped positions!")
+        return self.frame.wrapped_positions
+    
+    @property
+    def positions(self):
+        """
+        Return the positions of the current frame. If the current frame has unwrapped positions, return unwrapped positions; otherwise return wrapped positions.
+
+        """
+        if self._has_unwrapped_positions:
+            return self.unwrapped_positions
+        elif self._has_wrapped_positions:
+            return self.wrapped_positions
+        else:
+            raise AttributeError("This trajectory file does not have positions!")
+
+    @property
+    def box_boundaries(self):
+        return self.frame.box_boundaries
+
+    @property
+    def mol_ids(self):
+        if not self._has_mol_ids:
+            raise AttributeError("This trajectory file does not have mol ids!")
+        return self.frame.mol_ids
+
+    @property
+    def atom_types(self):
+        if not self._has_atom_types:
+            raise AttributeError("This trajectory file does not have atom types!")
+        return self.frame.atom_types
 
 def test(filename):
     reader = LammpsReader(filename,verbose=True)

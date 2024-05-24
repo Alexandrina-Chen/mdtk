@@ -3,3 +3,4 @@ from .raptorreader import *
 from .lammpsreader import *
 from .lammpsframe import *
 from .xyzreader import *
+from .molreader import *

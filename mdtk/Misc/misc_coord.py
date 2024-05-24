@@ -18,11 +18,41 @@ def wrap_coordinates(coordinates, boundary):
     """
     dimension = coordinates.shape[-1]
     if dimension != boundary.shape[0]:
-        raise ValueError("Dimension of coordinates and boundary do not match")
+        raise ValueError(f"Dimension of coordinates ({coordinates.shape}) and boundary ({boundary.shape}) do not match")
     moved_coordinates = coordinates - boundary[:, 0]
     wrapped_coordinates = moved_coordinates % np.abs(boundary[:, 1] - boundary[:, 0])
     wrapped_coordinates += boundary[:, 0]
     return wrapped_coordinates
+
+def calc_pbc_distance(coord1, coord2, box_length):
+    """
+    Parameters
+    ------------
+    coord1: ndarray, shape = (# of atoms in group 1, # of dimensions)
+    coord2: ndarray, shape = (# of atoms in group 2, # of dimensions)
+    box_length: ndarray, shape = (# of dimensions)
+
+    Returns
+    ------------
+    distance: ndarray, shape = (# of atoms in group 1, # of atoms in group 2)
+
+    Note
+    ------------
+    This function calculates the minimum image distance between two groups of atoms.
+    """
+    # check the shape of the input
+    assert coord1.shape[1] == coord2.shape[1], "Expect the same number of dimensions for coord1 and coord2, coord1.shape = {}, coord2.shape = {}".format(coord1.shape, coord2.shape)
+    assert coord1.shape[1] == len(box_length), "Expect the same number of dimensions for coord1, coord2, and box_length"
+    # calculate the distance
+    diff = coord1[:, np.newaxis, :] - coord2[np.newaxis, :, :] # shape = (n1, n2, # of dimensions)
+    # deal with periodic boundary conditions
+    diff %= box_length
+    # deal with the minimum image convention
+    diff_pbc = np.where(diff <= box_length / 2, diff, box_length - diff)
+    # calculate the distance via Euclidean norm
+    distance = np.linalg.norm(diff_pbc, axis=-1)
+    return distance
+
 
 def read_mols_file(filename, num_ion_pairs, max_layer):
     """

@@ -35,8 +35,8 @@ class RaptorReader(object):
         If not set, then the reader will read all the frames in the output file.
 
     """
-    n_frames: int
-    _frame = RaptorFrame
+    # n_frames: int
+    # _frame = RaptorFrame
 
     def __init__(self, filename, outputfreq=1, **kwargs) -> None:
 
@@ -44,6 +44,11 @@ class RaptorReader(object):
         self.filename = filename
         self._output_freq = int(outputfreq)
         self._check_sanity_filename()
+
+        # initialize 
+        self._n_frames = 0
+        self._frame = RaptorFrame
+        self._n_complexes = 0
 
         # initialize frame class-related arguments
         self._frame_kwargs = self._parse_frame_kwargs(kwargs)
@@ -113,10 +118,10 @@ class RaptorReader(object):
         with open(self.filename, 'r') as f:
             for line in f:
                 if line.startswith("COMPLEX_COUNT"):
-                    n_complexes= int(line.split()[1])
+                    self._n_complexes= int(line.split()[1])
                     break
-        self._cached["n_complexes"] = n_complexes
-        return n_complexes
+        self._cached["n_complexes"] = self._n_complexes
+        return self._n_complexes
     
     @functools.cached_property
     def n_frames(self):
@@ -134,7 +139,8 @@ class RaptorReader(object):
                     offsets.append(pos)
         self._offsets = offsets
         self._cached["n_frames"] = counter 
-        return len(self._offsets)
+        self._n_frames = counter
+        return self._n_frames
     
     def __len__(self):
         return self.n_frames

@@ -3,8 +3,8 @@ MDTK (Molecular Dynamics Toolkit) is a **personal** toolkit for assisting MD sim
 
 # Update log
 05/10/2023: upload symmetrized `polarizer` and `symLJ`
-
 06/29/2023: upload a LAMMPS-dump-liked reporter for OpenMM
+04/04/2024: new "Misc" sub-module, including some useful tools for MD simulations and analysis; updated parsers 
 
 # TODO
 1. Input file readers and writers: LAMMPS data file, PDB file

@@ -165,9 +165,9 @@ class XyzReader(object):
     # todo: add support for reading in multiple trajectory files; "_n_frames" should be the total number of frames in all trajectory files, therefore it should be a class property
     # maybe "_n_frames", "_offsets", "_cached" should be class properties? a experiment for now
     # a example of class property: https://stackoverflow.com/questions/5189699/how-to-make-a-class-property
-    _n_frames = 0
-    _frame = XyzFrame
-    _offsets = []
+    # _n_frames = 0
+    # _frame = XyzFrame
+    # _offsets = []
 
     def __init__(self, filename, verbose = False,**kwargs) -> None:
 
@@ -175,6 +175,12 @@ class XyzReader(object):
         self.filename = filename
         self._check_sanity_filename()
         self._verbose = verbose # if True, print out more information. Mostly for debugging purpose
+
+        # initialize the number of frames and number of atoms
+        self._n_frames = 0
+        self._frame = XyzFrame
+        self._offsets = []
+        self._n_atoms = 0
 
         # initialize frame class-related arguments
         self._frame_kwargs = self._parse_frame_kwargs(kwargs)
@@ -239,9 +245,9 @@ class XyzReader(object):
     @functools.cached_property
     def n_atoms(self):
         with open(self.filename, 'r') as f:
-            n_atoms = int(f.readline())
-        self._cached["n_atoms"] = n_atoms
-        return n_atoms
+            self._n_atoms = int(f.readline())
+        self._cached["n_atoms"] = self._n_atoms
+        return self._n_atoms
 
     @functools.cached_property
     def n_frames(self):
@@ -357,8 +363,10 @@ class XyzReader(object):
         frame : RaptorFrame
             Frame object.
         """
-        self._index = index-1
-        self._file.seek(self._offsets[index])
+        if index < 0 or index >= len(self):
+            raise IndexError("Index out of range!")
+        self.frame.index = index-1
+        # self._file.seek(self._offsets[index])
         return self._read_next_frame()
     
     def __getitem__(self, index) -> XyzFrame:
@@ -393,8 +401,10 @@ class XyzReader(object):
     def _read_first_time(self) -> None:
         """
         Check the information of the first frame and initialize the frame class
+        initialized the frame class with the number of atoms and number of frames
         """
-
+        _ = self.n_atoms
+        _ = self.n_frames
         self._has_initialized = True
 
 def test(filename):

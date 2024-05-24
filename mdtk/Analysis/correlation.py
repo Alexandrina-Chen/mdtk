@@ -5,6 +5,65 @@
 from copy import deepcopy
 import numpy as np
 
+
+"""
+# copy from `https://gist.github.com/anyuzx/0888680ea61090102d706f35bd9b97ea`
+# Since there is no real autocorrelation compute function in python and numpy
+# I write my own one
+
+import numpy as np
+
+# Suppose data array represent a time series data
+# each element represent data at given time
+# Assume time are equally spaced
+def acf(data):
+	mean = np.mean(data)
+	var = data.var()
+	length = len(data)
+
+	acf_array = []
+	for t in np.arange(0,length):
+		temp = np.mean((data[:(length-t)] - mean)*(data[t:] - mean))/var
+		acf_array.append(temp)
+
+	acf_array = np.array(acf_array)
+	return acf_array
+    
+"""
+
+def acf_bf(data):
+    """
+    brute force method to calculate autocorrelation of a 1D array of data.
+    by definition, the autocorrelation of a time series is the correlation of the time series with itself at different time lags.
+    acf(t) = \sum_{i=1}^{N-t} (x_{i} * x_{i+t}) / (N-t)
+    
+    Parameters
+    ----------
+    data : array-like
+        1D array of data.
+
+    Returns
+    -------
+    acf : array-like
+        autocorrelation of the data.
+    
+    """
+    length = len(data)
+    acf = np.zeros(length)
+    for t in range(length):
+        acf[t] = np.mean((data[:length-t]) * (data[t:]))
+    return acf
+
+def autocorrelation(data):
+    """
+    Calculate the autocorrelation of a 1D array of data.
+    """
+    extended_data = np.concatenate([data, np.zeros_like(data)])
+    fft_data = np.fft.fft(extended_data)
+    ifft_data = np.fft.ifft(fft_data * np.conj(fft_data)).real
+    autocorr = ifft_data[:len(data)] / np.arange(len(data), 0, -1)
+    return autocorr
+
 class Correlation:
     def __init__(self,list_of_set,tau_max,window_step=1,intermittency=0) -> None:
         self.SetList=list_of_set

@@ -6,27 +6,27 @@ import numpy as np
 
 class AnalysisBase(object):
     def __init__(self, coords,
-                 box_volume=None, box_lengths=None, bounds=None,
+                 box_volume=None, box_lengths=None, box_boundaries=None,
                  tell_time=False, err=sys.stderr, out=sys.stdout):
         """
         :param coords: numpy.array, xyz coordinates of ONLY necessary atoms/points.
         :param box_volume: float, volume of simulation box
         :param box_lengths: numpy.array, shape=(3,)
-        :param bounds: numpy.array, shape=(3,2)
+        :param box_boundaries: numpy.array, shape=(3,2)
         """
         self.coords = coords
 
         self._box_volume = None
         self._box_lengths = None
-        self._bounds = None
+        self._box_boundaries = None
         if box_volume is not None:
             self.box_volume = box_volume
         if box_lengths is not None:
             self.box_lengths = box_lengths
-        if bounds is not None:
-            self.bounds = bounds
+        if box_boundaries is not None:
+            self.box_boundaries = box_boundaries
 
-        self.tell_time = tell_time
+        self._tell_time = tell_time
         self.err = err
         self.out = out
         self.tell_format = '{ClassName} Processing Frame {Time}'.format(ClassName=self.__class__.__name__,
@@ -54,15 +54,15 @@ class AnalysisBase(object):
         self._box_volume = np.prod(self._box_lengths)
 
     @property
-    def bounds(self):
-        if self._bounds is None:
-            raise AttributeError("{ClassName}.bounds is not set!".format(ClassName=self.__class__.__name__))
-        return self._bounds
+    def box_boundaries(self):
+        if self._box_boundaries is None:
+            raise AttributeError("{ClassName}.box_boundaries is not set!".format(ClassName=self.__class__.__name__))
+        return self._box_boundaries
 
-    @bounds.setter
-    def bounds(self, bounds):
-        self._bounds = bounds
-        self._box_lengths = np.diff(self._bounds, axis=1).ravel()
+    @box_boundaries.setter
+    def box_boundaries(self, box_boundaries):
+        self._box_boundaries = box_boundaries
+        self._box_lengths = np.diff(self._box_boundaries, axis=1).ravel()
         self._box_volume = np.prod(self._box_lengths)
 
     @classmethod
