@@ -3,7 +3,7 @@
 '''
 Filename         : xyzreader.py
 Description      : A class to read the xyz file and store the data
-Time             : 
+Time             : 06/22/2024
 Last Modified    : 
 Author           : Sijia Chen
 Version          : 1.0
@@ -407,6 +407,75 @@ class XyzReader(object):
         _ = self.n_frames
         self._has_initialized = True
 
+    def __repr__(self):
+        return f"<XyzReader: {self.filename}>"
+
+    def write_to_xyz(self, filename, start=0, stop=None, step=1):
+        """
+        write the trajectory to a new file according to the slice
+
+        Parameters
+        ----------
+        filename : str
+            The name of the new file
+        start : int, optional
+            The start index of the slice, default is 0
+        stop : int, optional
+            The stop index of the slice, default is None
+        step : int, optional
+            The step of the slice, default is 1
+        """
+        # check the sanity of the input filename
+        if not isinstance(filename, str):
+            raise TypeError("Input file name must be a string!")
+        if os.path.isfile(filename):
+            # warn the user that the file already exists
+            print("Warning: file {} already exists and will be overwritten if you proceed!".format(filename))
+            # let the user decide whether to overwrite the file
+            user_input = input("Do you want to overwrite the file? (y/n)")
+            if user_input.lower() not in ["y", "yes"]:
+                print("User chose not to overwrite the file. Exiting...")
+                return
+            else:
+                print("User chose to overwrite the file. Proceeding...")
+        else:
+            pass
+        
+        # check the sanity of the slice
+        start, stop, step = self._slice_index_sanity_check(start, stop, step)
+        print(f"Writing the trajectory to the new file {filename} with slice {start}:{stop}:{step}...")
+        
+        # write the trajectory to the new file
+        with open(filename, 'w') as f:
+            for i in range(start, stop, step):
+                frame = self._read_frame(i)
+                f.write(f"{frame.n_atoms}\n")
+                f.write(f"{frame.comment}\n")
+                for element, position in zip(frame.elements, frame.positions):
+                    f.write(f"{element:<6s} {position[0]:18.10f} {position[1]:18.10f} {position[2]:18.10f}\n")
+
+    def _slice_index_sanity_check(self, start, stop, step):
+        start = self._index_sanity_check(start)
+        if start >= len(self):
+            raise ValueError(f"Start index is too large, start={start} >= {len(self)}")
+        if stop is None:
+            stop = len(self)
+        stop = self._index_sanity_check(stop)
+        
+        if step <= 0:
+            raise ValueError("Step must be positive integer!")
+        elif step > stop - start:
+            raise ValueError("Step is too large for the given slice!")
+        return start, stop, step
+
+    def _index_sanity_check(self, index):
+        if index < -len(self):
+            raise IndexError(f"Index out of range, {index} < -{len(self)}")
+        elif index < 0:
+            index = len(self) + index
+        elif index > len(self):
+            raise IndexError(f"Index out of range, {index} > {len(self)}")
+        return index
 def test(filename):
     reader = XyzReader(filename,verbose=True)
     pass
