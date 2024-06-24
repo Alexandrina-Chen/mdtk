@@ -245,7 +245,7 @@ class IntermittentCorrelation:
         self.tau_max = tau_max
         self.window_step = window_step
 
-    def autocorrelation(self):
+    def intermittent_correlation(self):
         """
         Calculate the intermittent correlation of a property of a set of particles.
 
