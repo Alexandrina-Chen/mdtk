@@ -64,6 +64,42 @@ def autocorrelation(data):
     autocorr = ifft_data[:len(data)] / np.arange(len(data), 0, -1)
     return autocorr
 
+def correct_intermittency(set_list,intermittency=0):
+    if intermittency == 0:
+        return set_list
+
+    set_list=deepcopy(set_list)
+
+    for i,set in enumerate(set_list):
+        # initially update each frame as seen 0 ago (now)
+        seen_frame_ago={s:0 for s in set}
+        for j in range(1,intermittency+2):
+            for s in seen_frame_ago.keys():
+                # no more frames:
+                if i + j >= len(set_list):
+                    continue
+
+                # if the element is absent now
+                if s not in set_list[i + j]:
+                    seen_frame_ago[s] +=1
+                    continue
+
+                # the element is present
+                if seen_frame_ago[s] == 0:
+                    # the element was present in the last frame
+                    continue
+
+                # the element was absent more times than allowed
+                if seen_frame_ago[s] > intermittency:
+                    continue
+
+                for k in range(seen_frame_ago[s],0,-1):
+                    set_list[i + j - k ].add(s)
+
+                seen_frame_ago[s] = 0
+    
+    return set_list
+
 class ContinuousCorrelation:
     def __init__(self,set_list,tau_max,window_step=1,intermittency=0) -> None:
         self.set_list=set_list
@@ -279,5 +315,44 @@ class IntermittentCorrelation:
 
         tau_timeseries.insert(0, 0)
         timeseries.insert(0, 1)
+
+        return tau_timeseries, timeseries, timeseries_data
+
+    def intermittent_correlation_v2(self):
+        """
+        Calculate the intermittent correlation of a property of a set of particles.
+
+        Returns
+        -------
+        tau_timeseries : list of int
+            the values of tau for which the autocorrelation was calculated
+        timeseries : list of int
+            the autocorelation values for each of the tau values
+        timeseries_data : list of list of int
+            the raw data from which the autocorrelation is computed, i.e :math:`S(\tau)` at each window.
+            This allows the time dependant evolution of :math:`S(\tau)` to be investigated.
+        """
+        tau_timeseries = list(range(0, self.tau_max + 1))
+        timeseries_data = [[] for _ in (range(self.tau_max+1)) ]
+
+        # calculate autocorrelation
+        for t in range(0, len(self.set_list), self.window_step):
+            Nt = len(self.set_list[t])
+            timeseries_data[0].append(Nt)
+            if Nt == 0:
+                continue
+            for tau in tau_timeseries:
+                if tau + t >= len(self.set_list):
+                    break
+
+                # calculate the intersection of sets at time `t` and time `t + tau` only, not the entire range
+                Ntau = len(set.intersection(self.set_list[t], self.set_list[t + tau]))
+                # timeseries_data[tau - 1].append(Ntau / float(Nt))
+                timeseries_data[tau].append(Ntau)
+
+        timeseries = [np.mean(x) for x in timeseries_data]
+        timeseries = np.array(timeseries) / timeseries[0]
+
+        
 
         return tau_timeseries, timeseries, timeseries_data
