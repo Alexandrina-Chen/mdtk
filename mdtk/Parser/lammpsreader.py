@@ -229,7 +229,7 @@ class LammpsReader(object):
             try:
                 frame.atom_types = np.array([int(x[self.attrs_to_cols["type"]]) for x in atom_info], dtype=np.int64)[sortedargs]
             except TypeError:
-                frame.atom_types = np.array([x[self.attrs_to_cols["type"]] for x in atom_info], dtype=np.string_)[sortedargs]
+                frame.atom_types = np.array([x[self.attrs_to_cols["type"]] for x in atom_info], dtype=np.str_)[sortedargs]
         if self._has_mol_ids:
             frame.mol_ids = np.array([int(x[self.attrs_to_cols["mol"]]) for x in atom_info], dtype=np.int64)[sortedargs]
         if self._has_velocities:
@@ -237,7 +237,7 @@ class LammpsReader(object):
         if self._has_forces:
             frame.forces = np.array([[float(y) for y in x[self.attrs_to_cols_forces]] for x in atom_info], dtype=np.float64)[sortedargs]
         if self._has_elements:
-            frame.elements = np.array([x[self.attrs_to_cols["element"]] for x in atom_info], dtype=np.string_)[sortedargs]
+            frame.elements = np.array([x[self.attrs_to_cols["element"]] for x in atom_info], dtype=np.str_)[sortedargs]
 
 
 
@@ -422,6 +422,148 @@ class LammpsReader(object):
         if not self._has_atom_types:
             raise AttributeError("This trajectory file does not have atom types!")
         return self.frame.atom_types
+
+    def write_to_lammpstrj(self, filename, start=0, stop=None, step=1):
+        """
+        Write the frames in the trajectory to a new lammpstrj file.
+
+        Parameters
+        ----------
+        filename : str
+            Name of the output lammpstrj file.
+        start : int, optional
+            The starting index of the frames to write.
+        stop : int, optional
+            The ending index of the frames to write.
+        step : int, optional
+            The step size of the frames to write.
+
+        """
+        # check sanity of input
+        if not isinstance(filename, str):
+            raise TypeError("Output file name must be a string!")
+        if os.path.isfile(filename):
+            # warn the user that the file already exists
+            print("Warning: file {} already exists and will be overwritten if you proceed!".format(filename))
+            # let the user decide whether to overwrite the file
+            user_input = input("Do you want to overwrite the file? (y/n)")
+            if user_input.lower() not in ["y", "yes"]:
+                print("User chose not to overwrite the file. Exiting...")
+                return
+            else:
+                print("User chose to overwrite the file. Proceeding...")
+        else:
+            pass
+
+        # check the sanity of the slice
+        start, stop, step = self._slice_index_sanity_check(start, stop, step)
+        print(f"Writing the trajectory to the new file {filename} with slice {start}:{stop}:{step}...")
+
+        # find attributes existing in the input trajectory file
+        attrs_to_write = []
+        attrs_to_get_from_frame = []
+        attrs_as_types = []
+        fmt = ""
+        if self._has_atom_ids:
+            attrs_to_write.append("id")
+            attrs_to_get_from_frame.append("atom_ids")
+            fmt += "%-10d "
+            attrs_as_types.append(np.int64)
+
+        if self._has_mol_ids:
+            attrs_to_write.append("mol")
+            attrs_to_get_from_frame.append("mol_ids")
+            fmt += "%-10d "
+            attrs_as_types.append(np.int64)
+        if self._has_atom_types:
+            attrs_to_write.append("type")
+            attrs_to_get_from_frame.append("atom_types")
+            fmt += "%-10d "
+            attrs_as_types.append(np.int64)
+        if self._has_masses:
+            attrs_to_write.append("mass")
+            attrs_to_get_from_frame.append("masses")
+            fmt += "%10.3f "
+            attrs_as_types.append(np.float64)
+        if self._has_elements:
+            attrs_to_write.append("element")
+            attrs_to_get_from_frame.append("elements")
+            fmt += "%6s "
+            attrs_as_types.append(np.str_)
+        if self._has_charges:
+            attrs_to_write.append("q")
+            attrs_to_get_from_frame.append("charges")
+            fmt += "%12.6f "
+            attrs_as_types.append(np.float64)
+        if self._has_wrapped_positions:
+            attrs_to_write.extend(["x","y","z"])
+            attrs_to_get_from_frame.append("wrapped_positions")
+            fmt += "%16.6f %16.6f %16.6f "
+            attrs_as_types.append(np.float64)
+        if self._has_unwrapped_positions:
+            attrs_to_write.extend(["xu","yu","zu"])
+            attrs_to_get_from_frame.append("unwrapped_positions")
+            fmt += "%16.6f %16.6f %16.6f "
+            attrs_as_types.append(np.float64)
+        if self._has_images:
+            attrs_to_write.extend(["ix","iy","iz"])
+            attrs_to_get_from_frame.append("images")
+            fmt += "%6d %6d %6d "
+            attrs_as_types.append(np.int64)
+        if self._has_velocities:
+            attrs_to_write.extend(["vx","vy","vz"])
+            attrs_to_get_from_frame.append("velocities")
+            fmt += "%16.6f %16.6f %16.6f "
+            attrs_as_types.append(np.float64)
+        if self._has_forces:
+            attrs_to_write.extend(["fx","fy","fz"])
+            attrs_to_get_from_frame.append("forces")
+            fmt += "%16.6f %16.6f %16.6f "
+            attrs_as_types.append(np.float64)
+        frame_attrs_header = " ".join(attrs_to_write)
+
+
+
+        with open(filename, 'w') as f:
+            for i in range(start, stop, step):
+                frame = self[i]
+                f.write("ITEM: TIMESTEP\n")
+                f.write(str(frame.timestep) + "\n")
+                f.write("ITEM: NUMBER OF ATOMS\n")
+                f.write(str(frame.n_atoms) + "\n")
+                f.write("ITEM: BOX BOUNDS pp pp pp\n")
+                for i in range(3):
+                    f.write(f"{frame.box_boundaries[i,0]:.6f} {frame.box_boundaries[i,1]:.6f}\n")
+                f.write(f"ITEM: ATOMS {frame_attrs_header}\n")
+                data_to_write = np.hstack(([getattr(frame, x).reshape(frame.n_atoms, -1) for x in attrs_to_get_from_frame]), dtype=object) 
+                for row in data_to_write:
+                    f.write(fmt % tuple(list(row)) + "\n")
+                   
+            
+
+
+    def _slice_index_sanity_check(self, start, stop, step):
+        start = self._index_sanity_check(start)
+        if start >= len(self):
+            raise ValueError(f"Start index is too large, start={start} >= {len(self)}")
+        if stop is None:
+            stop = len(self)
+        stop = self._index_sanity_check(stop)
+        
+        if step <= 0:
+            raise ValueError("Step must be positive integer!")
+        elif step > stop - start:
+            raise ValueError("Step is too large for the given slice!")
+        return start, stop, step
+
+    def _index_sanity_check(self, index):
+        if index < -len(self):
+            raise IndexError(f"Index out of range, {index} < -{len(self)}")
+        elif index < 0:
+            index = len(self) + index
+        elif index > len(self):
+            raise IndexError(f"Index out of range, {index} > {len(self)}")
+        return index
 
 def test(filename):
     reader = LammpsReader(filename,verbose=True)

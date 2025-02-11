@@ -25,6 +25,8 @@ class LammpsFrame(object):
         The index of current frame, starting from 0 for each trajectory file.
     timestep : int
         The timestep of current frame.
+    atom_ids : np.array, the atom ids of atoms in this frame with shape (n_atoms, )
+        Get the atom ids of atoms in this frame. In this class, they are always sorted.
     box_boundaries : np.array, the box boundaries of this frame with shape (3, 2)
         Store the box boundaries in this frame. Only support orthorhombic box.
     charges : np.array, the charges of atoms in this frame with shape (n_atoms, )
@@ -373,3 +375,15 @@ class LammpsFrame(object):
             return self._wrapped_positions
         else:
             raise ValueError("This frame does not have positions!")
+
+    @property
+    def atom_ids(self):
+        """
+        Get the atom ids of atoms in this frame. In this class, they are always sorted.
+        
+        Returns
+        -------
+        atom_ids: np.array, the atom ids of atoms in this frame with shape (n_atoms, ), starting from 1
+
+        """
+        return np.arange(self._n_atoms) + 1
