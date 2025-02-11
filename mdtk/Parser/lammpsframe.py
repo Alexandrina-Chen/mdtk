@@ -144,6 +144,18 @@ class LammpsFrame(object):
         self._box_boundaries = new_box_boundaries
 
     @property
+    def box_lengths(self):
+        """
+        Get the box lengths of this frame.
+        
+        Returns
+        -------
+        box_lengths: np.array, the box lengths of this frame with shape (3, )
+
+        """
+        return self._box_boundaries[:, 1] - self._box_boundaries[:, 0]
+
+    @property
     def charges(self):
         """
         Get the charges of atoms in this frame.

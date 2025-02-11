@@ -48,7 +48,7 @@ class XyzFrame(object):
         self._n_atoms = n_atoms
         self._index = -1
         self._timestep = -1
-        self._positions = np.zeros((n_atoms, 3))
+        self._positions = np.zeros((n_atoms, 3), dtype=np.float64)
         self._comment = ""
 
     @property
@@ -476,6 +476,99 @@ class XyzReader(object):
         elif index > len(self):
             raise IndexError(f"Index out of range, {index} > {len(self)}")
         return index
+
+
+class XyzWriter(object):
+    """
+    XyzWriter writes the trajectory file from the information of all frames in the trajectory file.
+    
+    Parameters
+    ----------
+    filename : str
+        Name of the xyz output file
+    verbose : bool, optional
+        If True, print out more information. Mostly for debugging purpose.
+
+    Attributes
+    ----------
+    n_frames : int
+        The number of frames already written to the trajectory file.
+    n_atoms : int
+        The number of atoms in the simulation.
+
+    """
+    def __init__(self, filename, verbose = False) -> None:
+        self.filename = filename
+        self._verbose = verbose
+
+        # check if the output file exists and whether to overwrite it, if it exists; if not or user chooses to overwrite, initialize the file object with write mode
+        self._check_sanity_filename()
+
+        # initialize the number of frames and number of atoms
+        self._n_frames = 0
+        self._n_atoms = 0
+
+
+    def _check_sanity_filename(self):
+        # check if the output file exists
+        if os.path.isfile(self.filename):
+            # warn the user that the file already exists
+            print("Warning: file {} already exists and will be overwritten if you proceed!".format(self.filename))
+            # let the user decide whether to overwrite the file
+            user_input = input("Do you want to overwrite the file? (y/n)")
+            if user_input.lower() not in ["y", "yes"]:
+                print("User chose not to overwrite the file. Exiting...")
+                raise FileExistsError("File {} already exists!".format(self.filename))
+            else:
+                print("User chose to overwrite the file. Proceeding...")
+        else:
+            pass
+        self._file = open(self.filename, 'w')
+
+    def write(self, n_atoms, elements, positions, comment=None):
+        """
+        Write the frame to the trajectory file
+
+        Parameters
+        ----------
+        n_atoms : int
+            The number of atoms in the frame
+        elements : list of str
+            The element names of the atoms in the frame
+        positions : np.array
+            The coordinates of the atoms in the frame with shape (n_atoms, 3)
+        comment : str, optional
+            The comment line of the frame, default is None
+        """
+
+        # check the sanity of the input
+        if n_atoms != len(positions) or n_atoms != len(elements):
+            raise ValueError("The number of atoms, elements, and positions do not match!")
+        if self._n_frames == 0:
+            self._n_atoms = n_atoms
+        else:
+            if n_atoms != self._n_atoms:
+                raise ValueError("The number of atoms in this frame does not match the previous frames!")
+        if comment is None:
+            comment = f"Frame {self._n_frames}"
+
+        # write the frame to the trajectory file
+        self._write_frame(n_atoms, comment, elements, positions)
+
+        # if the frame is written successfully, update the number of frames
+        self._n_frames += 1
+
+    def _write_frame(self, n_atoms, comment, elements, positions):
+        self._file.write(f"{n_atoms}\n")
+        self._file.write(f"{comment.strip()}\n")
+        for element, position in zip(elements, positions):
+            self._file.write(f"{element:<6s} {position[0]:18.6f} {position[1]:18.6f} {position[2]:18.6f}\n")
+
+    def close(self):
+        if hasattr(self, '_file'):
+            self._file.close()
+
+
 def test(filename):
     reader = XyzReader(filename,verbose=True)
     pass
